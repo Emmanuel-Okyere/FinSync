@@ -29,10 +29,32 @@ eq("bonus excess taxed at marginal 25%", d.incomeTax - dNo.incomeTax, 25000);
 eq("SSNIT ceiling", calculatePay({ basic: 10000000, date: "2026-10-05" }).ssnit, 379500);
 // Tier 3: 20% of 4,000 = 800 contributed; relief capped at 16.5% = 660
 const e = calculatePay({ basic: 400000, tier3Pct: 20, date: "2026-10-05" });
-eq("tier3 contribution", e.tier3, 80000); eq("tier3 relief cap", e.tier3Relief, 66000);
+eq("tier3 contribution", e.tier3, 80000); eq("tier3 relief cap", e.pensionRelief, 66000);
 // Junior employee overtime: basic 1,000; OT 700 -> 500 @5% + 200 @10% = 45
 const f = calculatePay({ basic: 100000, overtime: 70000, date: "2026-10-05" });
 eq("QJE overtime tax", f.overtimeTax, 4500);
+// Tier 2 is part of the 18.5% (employee 5.5% + employer 13%): shown for information, never taken from pay.
+const g = calculatePay({ basic: 600000, date: "2026-10-05" });
+eq("tier2 share of the 18.5%", g.tier2, 30000);
+eq("tier2 not deducted from pay", g.net, 600000 - 33000 - 102200);
+
+// Real payslip (Oct 2026): basic 13,562.98; SSF 745.96; Saving Scheme 5% = 678.15; PAYE 3,083.21; total 4,507.32.
+// Payroll taxes 1,097.80 more than basic − SSF, entered here as a taxable benefit.
+const slip = calculatePay({ basic: 1356298, deductions: [{ name: "Saving Scheme", type: "pct", value: 5 }], taxableBenefits: 109780, date: "2026-10-05" });
+eq("payslip SSF", slip.ssnit, 74596);
+eq("payslip saving scheme", slip.deductionsTotal, 67815);
+eq("payslip PAYE", slip.paye, 308321);
+eq("payslip total deductions", slip.ssnit + slip.deductionsTotal + slip.paye, 450732);
+eq("payslip take-home", slip.net, 905566);
+eq("benefits not added to gross", slip.gross, 1356298);
+// Fixed-amount deduction, after tax: doesn't change PAYE.
+const fixed = calculatePay({ basic: 600000, deductions: [{ type: "amount", value: 20000 }], date: "2026-10-05" });
+eq("fixed deduction leaves PAYE alone", fixed.paye, 102200);
+eq("fixed deduction reduces take-home", fixed.net, 600000 - 33000 - 102200 - 20000);
+// Recurring items carry through the year model.
+const yr = yearOfPay({ basic: 1356298, items: [], deductions: [{ type: "pct", value: 5 }], taxableBenefits: 109780, date: "2026-10-05" });
+eq("year average with deductions + benefits", yr.averageNet, 905566);
+
 console.log(fails ? `${fails} FAILED` : "ALL PASS");
 if (fails) process.exit(1);
 

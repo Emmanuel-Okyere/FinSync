@@ -72,9 +72,18 @@ export type PayInput = {
   bonus?: number; // bonus paid this month
   overtime?: number; // overtime paid this month
   tier3Pct?: number; // your voluntary Tier 3 / provident fund contribution, % of basic
-  otherDeductions?: number; // after-tax deductions (loans, dues)
+  otherDeductions?: number; // one-off after-tax deductions this month
+  deductions?: PayDeduction[]; // recurring after-tax deductions (saving scheme, loan, dues)
+  taxableBenefits?: number; // non-cash benefits taxed with pay (car, fuel, housing)
   date?: string; // pay date, picks the tax table
 };
+
+/** A recurring payslip deduction taken after tax: a % of basic or a fixed amount each month. */
+export type PayDeduction = { name?: string; type: "pct" | "amount"; value: number }; // pct: percent; amount: pesewas
+
+export function deductionAmount(d: PayDeduction, basic: number) {
+  return Math.max(0, d.type === "pct" ? r((basic * d.value) / 100) : d.value);
+}
 
 export type BandLine = { from: number; to: number | null; rate: number; taxed: number; tax: number };
 
@@ -83,9 +92,9 @@ export type PayResult = {
   gross: number;
   ssnit: number;
   ssnitBase: number;
-  tier2: number;
+  tier2: number; // 5% of insurable basic sent to your Tier 2 fund, paid out of the 18.5% (not extra)
   tier3: number;
-  tier3Relief: number;
+  pensionRelief: number; // Tier 3, tax-free up to 16.5% of basic
   chargeable: number;
   bands: BandLine[];
   incomeTax: number;
@@ -96,6 +105,9 @@ export type PayResult = {
   juniorEmployee: boolean;
   paye: number;
   otherDeductions: number;
+  deductions: { name?: string; amount: number }[];
+  deductionsTotal: number;
+  taxableBenefits: number;
   net: number;
   employerSsnit: number;
 };
@@ -123,12 +135,15 @@ export function calculatePay(input: PayInput): PayResult {
   const overtime = Math.max(0, input.overtime ?? 0);
   const tier3Pct = Math.min(100, Math.max(0, input.tier3Pct ?? 0));
   const otherDeductions = Math.max(0, input.otherDeductions ?? 0);
+  const taxableBenefits = Math.max(0, input.taxableBenefits ?? 0);
+  const deductions = (input.deductions ?? []).map((d) => ({ name: d.name, amount: deductionAmount(d, basic) }));
+  const deductionsTotal = deductions.reduce((s, d) => s + d.amount, 0);
 
   const ssnitBase = Math.min(basic, ssnitCeiling(date));
   const ssnit = r(ssnitBase * SSNIT_EMPLOYEE_RATE);
   const tier2 = r(ssnitBase * TIER2_RATE);
   const tier3 = r((basic * tier3Pct) / 100);
-  const tier3Relief = Math.min(tier3, r(basic * TIER3_RELIEF_CAP));
+  const pensionRelief = Math.min(tier3, r(basic * TIER3_RELIEF_CAP));
 
   // Bonus: up to 15% of annual basic is taxed at a flat 5% (final); the rest joins normal income.
   const bonusCap = r(basic * 12 * BONUS_CAP_OF_ANNUAL_BASIC);
@@ -148,11 +163,11 @@ export function calculatePay(input: PayInput): PayResult {
     overtimeToIncome = 0;
   }
 
-  const chargeable = Math.max(0, basic + allowances + bonusExcess + overtimeToIncome - ssnit - tier3Relief);
+  const chargeable = Math.max(0, basic + allowances + taxableBenefits + bonusExcess + overtimeToIncome - ssnit - pensionRelief);
   const { lines, total: incomeTax } = bandTax(chargeable, table);
   const paye = incomeTax + bonusTax + overtimeTax;
   const gross = basic + allowances + bonus + overtime;
-  const net = gross - ssnit - tier3 - paye - otherDeductions;
+  const net = gross - ssnit - tier3 - paye - otherDeductions - deductionsTotal;
 
   return {
     table,
@@ -161,7 +176,7 @@ export function calculatePay(input: PayInput): PayResult {
     ssnitBase,
     tier2,
     tier3,
-    tier3Relief,
+    pensionRelief,
     chargeable,
     bands: lines,
     incomeTax,
@@ -172,6 +187,9 @@ export function calculatePay(input: PayInput): PayResult {
     juniorEmployee,
     paye,
     otherDeductions,
+    deductions,
+    deductionsTotal,
+    taxableBenefits,
     net,
     employerSsnit: r(ssnitBase * SSNIT_EMPLOYER_RATE),
   };
@@ -214,12 +232,12 @@ export type AllowanceAfterTax = {
  * Ghana PAYE is withheld on what's paid each month, so lump sums are taxed in the month they arrive.
  * We model a year: quarterly allowances in 4 months, yearly allowances in one other month, then average.
  */
-export function yearOfPay(input: { basic: number; items: AllowanceItem[]; tier3Pct?: number; date?: string }): YearOfPay {
+export function yearOfPay(input: { basic: number; items: AllowanceItem[]; tier3Pct?: number; deductions?: PayDeduction[]; taxableBenefits?: number; date?: string }): YearOfPay {
   const sum = (per: AllowanceFrequency) => input.items.filter((a) => a.per === per).reduce((s, a) => s + Math.max(0, a.amount), 0);
   const monthly = sum("month");
   const quarterly = sum("quarter");
   const yearly = sum("year");
-  const base = { basic: input.basic, tier3Pct: input.tier3Pct, date: input.date };
+  const base = { basic: input.basic, tier3Pct: input.tier3Pct, deductions: input.deductions, taxableBenefits: input.taxableBenefits, date: input.date };
 
   const usual = calculatePay({ ...base, allowances: monthly });
   const noAllowances = monthly ? calculatePay({ ...base, allowances: 0 }) : usual;

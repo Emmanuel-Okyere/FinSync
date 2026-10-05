@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { incomes } from "@/db/schema";
 import { requireUser } from "@/lib/auth/session";
 import { toInputValue } from "@/lib/money";
-import { payslipItems } from "@/lib/payslip-form";
+import { payslipDeductionRows, payslipItems } from "@/lib/payslip-form";
 import { IncomeForm } from "@/components/setup/IncomeForm";
 import { saveIncome } from "../actions";
 import { StepHead } from "../steps";
@@ -25,7 +25,7 @@ export default async function SetupIncome() {
           payday: user.paydayRule,
           paydayDay: user.paydayDay,
           paydayWeekend: user.paydayWeekend,
-          payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })) } : null,
+          payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })), deductions: payslipDeductionRows(main.payslip), taxableBenefits: main.payslip.taxableBenefits ? toInputValue(main.payslip.taxableBenefits) : "" } : null,
           extras: rows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor).replace(/\.00$/, "") })),
         }}
       />

@@ -59,6 +59,10 @@ npm run test:paye
 
 The server always recomputes take-home from the gross inputs; it never trusts a figure sent by the browser.
 
+Tier 2 (5% of insurable basic) is paid out of the 18.5% (employee 5.5% + employer 13%), so it is shown for information and never deducted from take-home a second time.
+
+Payslips often carry more: recurring after-tax deductions (a staff saving scheme as a % of basic, loans, dues) and taxable benefits that aren't paid in cash (company car, fuel, housing). Both are supported (`deductions` and `taxableBenefits` in `calculatePay`). `scripts/test-paye.mts` includes a real October 2026 payslip that the engine reproduces to the pesewa.
+
 Allowances can be monthly, quarterly or yearly. PAYE is withheld on what's paid each month, so `yearOfPay()` models a year (quarterly allowances in 4 months, yearly in 1 other month), taxes each month separately, and budgets with the 12-month average. Each allowance's "you keep" figure is its share of the extra PAYE its group adds to the month it's paid in (split by amount), so the per-allowance tax adds up exactly to the total.
 
 ## Legal pages

@@ -4,7 +4,7 @@ import { incomes } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
 import { todayISO } from "@/lib/dates";
 import { toInputValue } from "@/lib/money";
-import { payslipItems } from "@/lib/payslip-form";
+import { payslipDeductionRows, payslipItems } from "@/lib/payslip-form";
 import { PageHead } from "@/components/app/PageHead";
 import { TaxCalculator } from "@/components/app/TaxCalculator";
 
@@ -28,6 +28,8 @@ export default async function Tax() {
           basic: ps ? toInputValue(ps.basic) : "",
           tier3Pct: ps?.tier3Pct ? String(ps.tier3Pct) : "",
           items: payslipItems(ps).map((x) => ({ name: x.name ?? "", amount: toInputValue(x.amount), per: x.per })),
+          deductions: payslipDeductionRows(ps),
+          taxableBenefits: ps?.taxableBenefits ? toInputValue(ps.taxableBenefits) : "",
         }}
       />
     </>

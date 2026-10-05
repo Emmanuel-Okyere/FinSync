@@ -7,6 +7,7 @@ import type { FormState } from "@/lib/action";
 import { yearOfPay } from "@/lib/paye";
 import { fmtShort, fmtWeekday, nextPaydayDetail, weekendLabel, type WeekendShift } from "@/lib/dates";
 import { AllowanceList, rowsToItems, type AllowanceRow } from "@/components/AllowanceList";
+import { BenefitsField, DeductionList, rowsToDeductions, type DeductionRow } from "@/components/DeductionList";
 
 type Extra = { name: string; amount: string };
 const parse = (s: string) => {
@@ -30,7 +31,7 @@ export function IncomeForm({
     paydayDay: number | null;
     paydayWeekend?: string;
     extras: Extra[];
-    payslip?: { basic: string; tier3Pct: string; items: AllowanceRow[] } | null;
+    payslip?: { basic: string; tier3Pct: string; items: AllowanceRow[]; deductions: DeductionRow[]; taxableBenefits: string } | null;
   };
   submitLabel?: string;
   returnTo?: string;
@@ -41,16 +42,19 @@ export function IncomeForm({
   const [basic, setBasic] = useState(initial.payslip?.basic ?? "");
   const [allowances, setAllowances] = useState<AllowanceRow[]>(initial.payslip?.items ?? []);
   const [tier3, setTier3] = useState(initial.payslip?.tier3Pct ?? "");
+  const [deductions, setDeductions] = useState<DeductionRow[]>(initial.payslip?.deductions ?? []);
+  const [benefits, setBenefits] = useState(initial.payslip?.taxableBenefits ?? "");
+  const [more, setMore] = useState(Boolean(initial.payslip?.deductions.length || initial.payslip?.taxableBenefits));
   const gross = mode === "gross" && kind === "salary";
   const year = gross
-    ? yearOfPay({ basic: Math.round(parse(basic) * 100), items: rowsToItems(allowances), tier3Pct: parse(tier3), date: new Date().toISOString().slice(0, 10) })
+    ? yearOfPay({ basic: Math.round(parse(basic) * 100), items: rowsToItems(allowances), tier3Pct: parse(tier3), deductions: rowsToDeductions(deductions), taxableBenefits: Math.round(parse(benefits) * 100), date: new Date().toISOString().slice(0, 10) })
     : null;
   const pay = year
     ? {
         ...year.usual,
         basicPlus: Math.round(parse(basic) * 100) + year.monthlyAllowanceEquivalent,
         // Residual so the lines add up exactly to the saved average (within a pesewa of annual tax ÷ 12).
-        avgTax: Math.round(parse(basic) * 100) + year.monthlyAllowanceEquivalent - year.usual.ssnit - year.usual.tier3 - year.averageNet,
+        avgTax: Math.round(parse(basic) * 100) + year.monthlyAllowanceEquivalent - year.usual.ssnit - year.usual.tier3 - year.usual.deductionsTotal - year.averageNet,
       }
     : null;
   const main = year ? (parse(basic) ? (year.averageNet / 100).toFixed(2) : "") : netInput;
@@ -110,12 +114,23 @@ export function IncomeForm({
                 </div>
               </div>
               <AllowanceList rows={allowances} onChange={setAllowances} afterTax={year && parse(basic) ? year.allowances : undefined} />
+              {more ? (
+                <div className="sk-stack" style={{ gap: 12, paddingTop: 4, borderTop: "1px solid var(--line)" }}>
+                  <DeductionList rows={deductions} onChange={setDeductions} basic={Math.round(parse(basic) * 100)} />
+                  <BenefitsField value={benefits} onChange={setBenefits} />
+                </div>
+              ) : (
+                <button type="button" className="sk-link" style={{ fontSize: 14, alignSelf: "flex-start" }} onClick={() => (setMore(true), deductions.length || setDeductions([{ name: "", type: "pct", value: "" }]))}>
+                  More from your payslip? Add deductions or taxable benefits
+                </button>
+              )}
               <dl className="sk-stack" style={{ gap: 6, margin: 0, fontSize: 14 }}>
                 {(
                   [
                     [lumpy ? "Gross pay (monthly average)" : "Gross pay", pay.basicPlus, ""],
                     ["SSNIT (5.5% of basic)", -pay.ssnit, ""],
                     ...(pay.tier3 ? ([["Tier 3", -pay.tier3, ""]] as const) : []),
+                    ...(pay.deductionsTotal ? ([["Deductions after tax", -pay.deductionsTotal, ""]] as const) : []),
                     [lumpy ? "Income tax (monthly average)" : "Income tax (PAYE)", -pay.avgTax, ""],
                     [lumpy ? "Take-home (monthly average)" : "Take-home", year!.averageNet, "b"],
                   ] as const

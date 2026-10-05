@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActionForm, Submit } from "@/components/forms";
 import { calculatePay, QJE_ANNUAL_LIMIT, TIER3_RELIEF_CAP, yearOfPay } from "@/lib/paye";
 import { AllowanceList, rowsToItems, type AllowanceRow } from "@/components/AllowanceList";
+import { BenefitsField, DeductionList, rowsToDeductions, type DeductionRow } from "@/components/DeductionList";
 import { saveTakeHomeFromGross } from "@/app/(app)/_actions/tax";
 
 const toMinor = (s: string) => {
@@ -13,7 +14,7 @@ const toMinor = (s: string) => {
 const f2 = (m: number) => new Intl.NumberFormat("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(m / 100);
 const f0 = (m: number) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 0 }).format(Math.round(m / 100));
 
-type Init = { basic: string; tier3Pct: string; items: AllowanceRow[] };
+type Init = { basic: string; tier3Pct: string; items: AllowanceRow[]; deductions: DeductionRow[]; taxableBenefits: string };
 
 function Money({ id, label, value, set, hint }: { id: string; label: string; value: string; set: (v: string) => void; hint?: string }) {
   return (
@@ -34,11 +35,15 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
   const [bonus, setBonus] = useState("");
   const [overtime, setOvertime] = useState("");
   const [tier3, setTier3] = useState(initial.tier3Pct);
+  const [deductionRows, setDeductionRows] = useState<DeductionRow[]>(initial.deductions);
+  const [benefits, setBenefits] = useState(initial.taxableBenefits);
   const [other, setOther] = useState("");
   const tier3Pct = Math.min(50, Math.max(0, Number(tier3) || 0));
   const items = rowsToItems(allowanceRows);
   const monthlyAllowances = items.filter((a) => a.per === "month").reduce((s, a) => s + a.amount, 0);
-  const year = yearOfPay({ basic: toMinor(basic), items, tier3Pct, date: today });
+  const deductions = rowsToDeductions(deductionRows);
+  const taxableBenefits = toMinor(benefits);
+  const year = yearOfPay({ basic: toMinor(basic), items, tier3Pct, deductions, taxableBenefits, date: today });
   const lumpy = Boolean(year.quarterMonth || year.yearMonth);
   const p = calculatePay({
     basic: toMinor(basic),
@@ -46,6 +51,8 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
     bonus: toMinor(bonus),
     overtime: toMinor(overtime),
     tier3Pct,
+    deductions,
+    taxableBenefits,
     otherDeductions: toMinor(other),
     date: today,
   });
@@ -63,7 +70,8 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
     ["Income tax (PAYE)", -p.incomeTax],
     ...(p.bonusTax ? ([["Bonus tax (5%)", -p.bonusTax]] as [string, number][]) : []),
     ...(p.overtimeTax ? ([["Overtime tax (junior staff rate)", -p.overtimeTax]] as [string, number][]) : []),
-    ...(p.otherDeductions ? ([["Other deductions", -p.otherDeductions]] as [string, number][]) : []),
+    ...p.deductions.filter((d) => d.amount).map((d, i) => [d.name || `Deduction ${i + 1}`, -d.amount] as [string, number]),
+    ...(p.otherDeductions ? ([["One-off deductions", -p.otherDeductions]] as [string, number][]) : []),
     ["Take-home pay", p.net, "total"],
   ];
 
@@ -89,6 +97,12 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
           </div>
           <AllowanceList rows={allowanceRows} onChange={setAllowanceRows} afterTax={has ? year.allowances : undefined} />
           <span className="sk-cap">Transport, rent, fuel, clothing… Pick how often each is paid; we&apos;ll do the maths.</span>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }} className="sk-stack">
+            <DeductionList rows={deductionRows} onChange={setDeductionRows} basic={toMinor(basic)} />
+          </div>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+            <BenefitsField value={benefits} onChange={setBenefits} />
+          </div>
         </div>
         <div className="sk-card sk-card--pad sk-stack">
           <div>
@@ -98,7 +112,7 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
           <div className="sk-grid g-3" style={{ gap: 12 }}>
             <Money id="bonus" label="Bonus" value={bonus} set={setBonus} />
             <Money id="overtime" label="Overtime" value={overtime} set={setOvertime} />
-            <Money id="other" label="Other deductions" value={other} set={setOther} hint="Loans, dues (after tax)" />
+            <Money id="other" label="One-off deductions" value={other} set={setOther} hint="After tax, this month only" />
           </div>
         </div>
 
@@ -107,8 +121,8 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
             <div>
               <b className="sk-h">How the income tax is worked out</b>
               <div className="sk-cap">
-                Taxable income GH₵ {f2(p.chargeable)} = basic + allowances{p.bonusTaxedAtFlat < toMinor(bonus) ? " + bonus above the 5% limit" : ""}
-                {toMinor(overtime) && !p.juniorEmployee ? " + overtime" : ""} − SSNIT{p.tier3Relief ? " − Tier 3" : ""}.
+                Taxable income GH₵ {f2(p.chargeable)} = basic + allowances{p.taxableBenefits ? " + taxable benefits" : ""}{p.bonusTaxedAtFlat < toMinor(bonus) ? " + bonus above the 5% limit" : ""}
+                {toMinor(overtime) && !p.juniorEmployee ? " + overtime" : ""} − SSNIT{p.pensionRelief ? ` − Tier 3${p.pensionRelief < p.tier3 ? " (up to 16.5% of basic)" : ""}` : ""}.
               </div>
             </div>
             <div className="sk-tablewrap">
@@ -218,6 +232,14 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
         <ActionForm action={saveTakeHomeFromGross} showOk className="sk-stack">
           <input type="hidden" name="basic" value={basic} />
           <input type="hidden" name="tier3Pct" value={tier3} />
+          <input type="hidden" name="taxableBenefits" value={benefits} />
+          {deductionRows.map((r, i) => (
+            <span key={`d${i}`} hidden>
+              <input type="hidden" name="deductionName" value={r.name} />
+              <input type="hidden" name="deductionType" value={r.type} />
+              <input type="hidden" name="deductionValue" value={r.value} />
+            </span>
+          ))}
           {allowanceRows.map((r, i) => (
             <span key={i} hidden>
               <input type="hidden" name="allowanceName" value={r.name} />
@@ -229,7 +251,7 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
           {lumpy || oneOffs ? (
             <span className="sk-cap">
               {lumpy ? "That's your average month, so lump sums are spread across the plan. " : ""}
-              {oneOffs ? "Bonus, overtime and other deductions are left out; they don't happen every month." : ""}
+              {oneOffs ? "Bonus, overtime and one-off deductions are left out; they don't happen every month." : ""}
             </span>
           ) : null}
         </ActionForm>

@@ -25,7 +25,15 @@ export type Scheme = { id: string; name: string; buckets: Bucket[] };
 
 export type PayslipAllowance = { name?: string; amount: number; per: "month" | "quarter" | "year" };
 // `allowances` is the monthly equivalent (kept for older rows); `items` holds each allowance and how often it's paid.
-export type PayslipInput = { basic: number; allowances: number; tier3Pct: number; items?: PayslipAllowance[] };
+export type PayslipDeduction = { name?: string; type: "pct" | "amount"; value: number };
+export type PayslipInput = {
+  basic: number;
+  allowances: number;
+  tier3Pct: number;
+  items?: PayslipAllowance[];
+  deductions?: PayslipDeduction[]; // recurring, after tax (pct: percent of basic; amount: pesewas)
+  taxableBenefits?: number; // monthly non-cash benefits that payroll taxes
+};
 
 export type UserSettings = {
   overBudgetAlerts: boolean;
