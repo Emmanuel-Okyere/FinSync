@@ -76,3 +76,7 @@ Payday can be the 25th, the last working day, weekly (Fridays) or a set date. Fo
 ## Feedback: toasts and confirmations
 
 Every action that changes data reports back with a toast (`components/feedback.tsx`); page loads and searches don't. Forms and buttons go through `useServerAction()`, which fires the toast when the action completes, so it still shows when the triggering element disappears (e.g. deleting the row you clicked). Actions that redirect call `flash()` (`src/lib/flash.ts`), a 30-second cookie the next page turns into a toast. Destructive actions use the in-app confirm modal (`useConfirm()` / `ActionButton confirm={…}`), never `window.confirm`.
+
+## Icons
+
+The browser tab icon is the two linked rings (the design notes "favicon drops the arrow"); home-screen and app icons use the full mark. All are generated from the logo by `node scripts/make-icons.mjs` (src/app/icon.svg, favicon.ico, apple-icon.png, public/icons/*); rerun it if the logo or brand green changes.
