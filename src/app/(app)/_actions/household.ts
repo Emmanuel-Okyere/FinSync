@@ -50,7 +50,7 @@ export async function inviteMember(_: FormState, fd: FormData): Promise<FormStat
     if (!existing) {
       await db.insert(householdInvites).values({ householdId: m.householdId, phone, invitedBy: user.id, expiresAt: new Date(Date.now() + 7 * 86_400_000) });
     }
-    const base = process.env.APP_URL ?? "";
+    const base = process.env.APP_URL || "";
     // The SMS carries no secret: the invite is claimed by signing in with this (verified) number.
     await sendSms(phone, `${user.firstName} invited you to share the "${m.h.name.slice(0, 40)}" budget on FinSync. Sign in or sign up with this number to join${base ? `: ${base}/household` : "."}`);
     return "Invite sent by SMS";

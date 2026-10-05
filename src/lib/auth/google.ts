@@ -9,7 +9,7 @@ export const OAUTH_COOKIE = prod ? "__Host-fs_oauth" : "fs_oauth";
 const key = () => new TextEncoder().encode(process.env.JWT_SECRET!);
 
 export function redirectUri(origin: string) {
-  return `${process.env.APP_URL ?? origin}/api/auth/google/callback`;
+  return `${process.env.APP_URL || origin}/api/auth/google/callback`;
 }
 
 export async function startGoogle(origin: string) {

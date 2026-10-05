@@ -33,7 +33,9 @@ export async function run(fn: () => Promise<string | void>, opts: { refresh?: bo
     }
     if (e instanceof Error && e.message.startsWith("Your session has ended")) return { error: e.message, at: Date.now() };
     console.error("[action]", e);
-    return { error: "Something went wrong. Please try again.", at: Date.now() };
+    // Details only in development; production never exposes internal errors.
+    const detail = process.env.NODE_ENV !== "production" && e instanceof Error ? ` (${e.message})` : "";
+    return { error: `Something went wrong. Please try again.${detail}`, at: Date.now() };
   }
 }
 
