@@ -296,3 +296,13 @@ details > summary::-webkit-details-marker { display: none; }
 .sk-legal p, .sk-legal li { color: var(--ink); }
 .sk-legal table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .sk-legal th, .sk-legal td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sk-allow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto; gap: 8px; align-items: stretch; }
+@media (max-width: 600px) {
+  .sk-allow { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .sk-allow__name { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .sk-allow__cur { display: none; }
+  .sk-allow__amt { padding: 0 12px; }
+  .sk-allow__per { padding: 0 6px 0 10px !important; font-size: 14px; }
+}

@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { budgetMonths, categories, fixedExpenses, incomes, users, type PayslipInput } from "@/db/schema";
-import { calculatePay } from "@/lib/paye";
+import { parsePayslipForm } from "@/lib/payslip-form";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { ensureCategories } from "@/lib/budget";
@@ -24,18 +24,14 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
     let payslip: PayslipInput | null = null;
     if (fd.get("mode") === "gross" && kind === "salary") {
       // Never trust the browser's figure: recompute take-home from the gross inputs.
-      const basic = parseMoney(String(fd.get("basic") ?? ""));
-      const allowances = parseMoney(String(fd.get("allowances") ?? "") || "0");
-      const tier3Pct = Number(String(fd.get("tier3Pct") ?? "").trim() || "0");
-      if (basic == null || basic <= 0) throw new UserError("Enter your basic salary, like 6000");
-      if (allowances == null) throw new UserError("Allowances: enter a number like 500");
-      if (!Number.isFinite(tier3Pct) || tier3Pct < 0 || tier3Pct > 50) throw new UserError("Tier 3: enter a percentage between 0 and 50");
-      payslip = { basic, allowances, tier3Pct };
-      main = calculatePay({ ...payslip, date: todayISO() }).net;
+      const r = parsePayslipForm(fd, todayISO());
+      payslip = r.payslip;
+      main = r.net;
     }
     if (main == null || main <= 0) throw new UserError("Enter your take-home pay, like 5800", "main");
     const payday = PAYDAY.parse(fd.get("payday") ?? "last_working_day");
     const paydayDay = payday === "date" ? z.coerce.number().int().min(1).max(31).parse(fd.get("paydayDay")) : null;
+    const paydayWeekend = z.enum(["before", "after", "same"]).catch("before").parse(fd.get("paydayWeekend"));
 
     const names = fd.getAll("extraName").map(String);
     const amounts = fd.getAll("extraAmount").map(String);
@@ -55,7 +51,7 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
         { userId: user.id, name: mainName, kind, amountMinor: main, variable: false, payslip },
         ...extras.map((x) => ({ userId: user.id, name: x.name, kind: "other", amountMinor: x.amount!, variable: true })),
       ]),
-      db.update(users).set({ paydayRule: payday, paydayDay, updatedAt: new Date() }).where(eq(users.id, user.id)),
+      db.update(users).set({ paydayRule: payday, paydayDay, paydayWeekend, updatedAt: new Date() }).where(eq(users.id, user.id)),
     ]);
     if (fd.get("returnTo") === "settings") return "Income saved";
     redirect("/setup/scheme");

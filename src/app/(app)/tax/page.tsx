@@ -4,6 +4,7 @@ import { incomes } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
 import { todayISO } from "@/lib/dates";
 import { toInputValue } from "@/lib/money";
+import { payslipItems } from "@/lib/payslip-form";
 import { PageHead } from "@/components/app/PageHead";
 import { TaxCalculator } from "@/components/app/TaxCalculator";
 
@@ -25,8 +26,8 @@ export default async function Tax() {
         today={todayISO()}
         initial={{
           basic: ps ? toInputValue(ps.basic) : "",
-          allowances: ps?.allowances ? toInputValue(ps.allowances) : "",
           tier3Pct: ps?.tier3Pct ? String(ps.tier3Pct) : "",
+          items: payslipItems(ps).map((x) => ({ name: x.name ?? "", amount: toInputValue(x.amount), per: x.per })),
         }}
       />
     </>

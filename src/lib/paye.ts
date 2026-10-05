@@ -176,3 +176,91 @@ export function calculatePay(input: PayInput): PayResult {
     employerSsnit: r(ssnitBase * SSNIT_EMPLOYER_RATE),
   };
 }
+
+/* ------------------------------------------------ Allowances paid at different intervals */
+
+export type AllowanceFrequency = "month" | "quarter" | "year";
+export type AllowanceItem = { name?: string; amount: number; per: AllowanceFrequency };
+
+export const FREQUENCY_LABEL: Record<AllowanceFrequency, string> = { month: "Monthly", quarter: "Quarterly", year: "Yearly" };
+const PER_YEAR: Record<AllowanceFrequency, number> = { month: 12, quarter: 4, year: 1 };
+
+/** Average monthly value of a set of allowances (for display only; tax is worked out per pay month). */
+export function monthlyEquivalent(items: AllowanceItem[]) {
+  return Math.round(items.reduce((s, a) => s + a.amount * PER_YEAR[a.per], 0) / 12);
+}
+
+export type YearOfPay = {
+  usual: PayResult; // a month with only monthly allowances
+  quarterMonth: PayResult | null; // a month that also pays the quarterly allowances
+  yearMonth: PayResult | null; // the month that also pays the yearly allowances
+  averageNet: number; // take-home averaged over 12 months: use this for budgeting
+  annualNet: number;
+  annualTax: number;
+  monthlyAllowanceEquivalent: number;
+  allowances: AllowanceAfterTax[]; // same order as the input items
+};
+
+export type AllowanceAfterTax = {
+  amount: number; // per payment
+  per: AllowanceFrequency;
+  tax: number; // PAYE it adds, per payment
+  kept: number; // what you keep, per payment
+  keptPerYear: number;
+  rate: number; // share of the allowance taken in tax (0–1)
+};
+
+/**
+ * Ghana PAYE is withheld on what's paid each month, so lump sums are taxed in the month they arrive.
+ * We model a year: quarterly allowances in 4 months, yearly allowances in one other month, then average.
+ */
+export function yearOfPay(input: { basic: number; items: AllowanceItem[]; tier3Pct?: number; date?: string }): YearOfPay {
+  const sum = (per: AllowanceFrequency) => input.items.filter((a) => a.per === per).reduce((s, a) => s + Math.max(0, a.amount), 0);
+  const monthly = sum("month");
+  const quarterly = sum("quarter");
+  const yearly = sum("year");
+  const base = { basic: input.basic, tier3Pct: input.tier3Pct, date: input.date };
+
+  const usual = calculatePay({ ...base, allowances: monthly });
+  const noAllowances = monthly ? calculatePay({ ...base, allowances: 0 }) : usual;
+  const quarterMonth = quarterly ? calculatePay({ ...base, allowances: monthly + quarterly }) : null;
+  const yearMonth = yearly ? calculatePay({ ...base, allowances: monthly + yearly }) : null;
+
+  const qMonths = quarterMonth ? 4 : 0;
+  const yMonths = yearMonth ? 1 : 0;
+  const usualMonths = 12 - qMonths - yMonths;
+  const annualNet = usual.net * usualMonths + (quarterMonth?.net ?? 0) * qMonths + (yearMonth?.net ?? 0) * yMonths;
+  const annualTax = usual.paye * usualMonths + (quarterMonth?.paye ?? 0) * qMonths + (yearMonth?.paye ?? 0) * yMonths;
+  // Extra PAYE each group adds to the month it's paid in, shared across that group's items by amount.
+  // Shares are rounded per item, with the last item taking the remainder so they sum exactly.
+  const groupTax: Record<AllowanceFrequency, number> = {
+    month: usual.paye - noAllowances.paye,
+    quarter: quarterMonth ? quarterMonth.paye - usual.paye : 0,
+    year: yearMonth ? yearMonth.paye - usual.paye : 0,
+  };
+  const groupTotal: Record<AllowanceFrequency, number> = { month: monthly, quarter: quarterly, year: yearly };
+  const left = { ...groupTax };
+  const remaining = { ...groupTotal };
+  const allowances: AllowanceAfterTax[] = input.items.map((a) => {
+    const amount = Math.max(0, a.amount);
+    let tax = 0;
+    if (amount > 0 && groupTotal[a.per] > 0) {
+      remaining[a.per] -= amount;
+      tax = remaining[a.per] === 0 ? left[a.per] : Math.round((groupTax[a.per] * amount) / groupTotal[a.per]);
+      left[a.per] -= tax;
+    }
+    const kept = amount - tax;
+    return { amount, per: a.per, tax, kept, keptPerYear: kept * PER_YEAR[a.per], rate: amount ? tax / amount : 0 };
+  });
+
+  return {
+    usual,
+    quarterMonth,
+    yearMonth,
+    allowances,
+    averageNet: Math.round(annualNet / 12),
+    annualNet,
+    annualTax,
+    monthlyAllowanceEquivalent: monthlyEquivalent(input.items),
+  };
+}

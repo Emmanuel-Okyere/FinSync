@@ -59,28 +59,56 @@ export function relDay(iso: string, today = todayISO()) {
   return fmt({ weekday: "short", day: "numeric", month: "short" }).format(new Date(`${iso}T00:00:00Z`));
 }
 
-/** Next payday on or after `from` for a given rule. */
-export function nextPayday(rule: string, day: number | null, from: string): string {
-  const pick = (monthISO: string) => {
-    if (rule === "25th") return `${monthISO.slice(0, 7)}-25`;
-    if (rule === "date" && day) return `${monthISO.slice(0, 7)}-${String(Math.min(day, daysInMonth(monthISO))).padStart(2, "0")}`;
-    // last working day (Mon–Fri)
-    let d = monthEnd(monthISO);
-    for (;;) {
-      const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
-      if (wd !== 0 && wd !== 6) return d;
-      d = addDays(d, -1);
-    }
-  };
+export type WeekendShift = "before" | "after" | "same";
+
+/** Moves a Saturday/Sunday payday to the Friday before or the Monday after. */
+export function shiftWeekend(iso: string, shift: WeekendShift) {
+  if (shift === "same") return iso;
+  const wd = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  if (wd === 6) return addDays(iso, shift === "before" ? -1 : 2);
+  if (wd === 0) return addDays(iso, shift === "before" ? -2 : 1);
+  return iso;
+}
+
+/** Next payday on or after `from`, plus the date it was moved from (if a weekend shift applied). */
+export function nextPaydayDetail(rule: string, day: number | null, from: string, weekend: WeekendShift = "same"): { date: string; movedFrom: string | null } {
   if (rule === "weekly") {
     // Fridays
     let d = from;
     while (new Date(`${d}T00:00:00Z`).getUTCDay() !== 5) d = addDays(d, 1);
-    return d;
+    return { date: d, movedFrom: null };
   }
-  const thisMonth = pick(monthStart(from));
-  return thisMonth >= from ? thisMonth : pick(addMonths(monthStart(from), 1));
+  const pick = (monthISO: string) => {
+    let raw: string;
+    if (rule === "25th") raw = `${monthISO.slice(0, 7)}-25`;
+    else if (rule === "date" && day) raw = `${monthISO.slice(0, 7)}-${String(Math.min(day, daysInMonth(monthISO))).padStart(2, "0")}`;
+    else {
+      // last working day (Mon–Fri): already a weekday
+      let d = monthEnd(monthISO);
+      while ([0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay())) d = addDays(d, -1);
+      return { date: d, movedFrom: null };
+    }
+    const date = shiftWeekend(raw, weekend);
+    return { date, movedFrom: date === raw ? null : raw };
+  };
+  // A shift can cross a month boundary (e.g. the 31st on a Saturday paid on Monday the 2nd), so check around `from`.
+  const m = monthStart(from);
+  return [addMonths(m, -1), m, addMonths(m, 1), addMonths(m, 2)]
+    .map(pick)
+    .filter((p) => p.date >= from)
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
 }
+
+/** Next payday on or after `from` for a given rule. Fixed dates (25th, set date) honour the weekend shift. */
+export function nextPayday(rule: string, day: number | null, from: string, weekend: WeekendShift = "same"): string {
+  return nextPaydayDetail(rule, day, from, weekend).date;
+}
+
+export const weekendLabel: Record<WeekendShift, string> = {
+  before: "Friday before",
+  after: "Monday after",
+  same: "On the day",
+};
 
 export const paydayLabel: Record<string, string> = {
   "25th": "25th",

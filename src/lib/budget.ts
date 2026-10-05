@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import { DEFAULT_CATEGORIES, STARTER_SPLIT } from "@/lib/categories";
-import { addMonths, daysInMonth, dayOf, diffDays, monthEnd, monthStart, nextPayday, todayISO } from "@/lib/dates";
+import { addMonths, daysInMonth, dayOf, diffDays, monthEnd, monthStart, nextPayday, todayISO, type WeekendShift } from "@/lib/dates";
 import { DEFAULT_SCHEME, bucketFor } from "@/lib/schemes";
 
 export async function ensureCategories(userId: string) {
@@ -255,7 +255,7 @@ export async function getMonthView(user: SessionUser, month: string) {
   const isCurrent = monthStart(today) === month;
   const days = daysInMonth(month);
   const day = isCurrent ? dayOf(today) : today > end ? days : 0;
-  const payday = isCurrent ? nextPayday(user.paydayRule, user.paydayDay, today) : null;
+  const payday = isCurrent ? nextPayday(user.paydayRule, user.paydayDay, today, user.paydayWeekend as WeekendShift) : null;
   const daysLeft = payday ? Math.max(1, diffDays(today, payday)) : 0;
 
   const spendBuckets = buckets.filter((b) => b.key !== "savings");

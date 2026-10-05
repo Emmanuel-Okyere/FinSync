@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { incomes } from "@/db/schema";
 import { requireUser } from "@/lib/auth/session";
 import { toInputValue } from "@/lib/money";
+import { payslipItems } from "@/lib/payslip-form";
 import { IncomeForm } from "@/components/setup/IncomeForm";
 import { saveIncome } from "../actions";
 import { StepHead } from "../steps";
@@ -23,7 +24,8 @@ export default async function SetupIncome() {
           kind: main?.kind ?? "salary",
           payday: user.paydayRule,
           paydayDay: user.paydayDay,
-          payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), allowances: main.payslip.allowances ? toInputValue(main.payslip.allowances) : "", tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "" } : null,
+          paydayWeekend: user.paydayWeekend,
+          payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })) } : null,
           extras: rows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor).replace(/\.00$/, "") })),
         }}
       />

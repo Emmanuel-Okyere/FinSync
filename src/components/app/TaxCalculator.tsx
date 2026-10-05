@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { ActionForm, Submit } from "@/components/forms";
-import { calculatePay, QJE_ANNUAL_LIMIT, TIER3_RELIEF_CAP } from "@/lib/paye";
+import { calculatePay, QJE_ANNUAL_LIMIT, TIER3_RELIEF_CAP, yearOfPay } from "@/lib/paye";
+import { AllowanceList, rowsToItems, type AllowanceRow } from "@/components/AllowanceList";
 import { saveTakeHomeFromGross } from "@/app/(app)/_actions/tax";
 
 const toMinor = (s: string) => {
@@ -12,7 +13,7 @@ const toMinor = (s: string) => {
 const f2 = (m: number) => new Intl.NumberFormat("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(m / 100);
 const f0 = (m: number) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 0 }).format(Math.round(m / 100));
 
-type Init = { basic: string; allowances: string; tier3Pct: string };
+type Init = { basic: string; tier3Pct: string; items: AllowanceRow[] };
 
 function Money({ id, label, value, set, hint }: { id: string; label: string; value: string; set: (v: string) => void; hint?: string }) {
   return (
@@ -29,15 +30,19 @@ function Money({ id, label, value, set, hint }: { id: string; label: string; val
 
 export function TaxCalculator({ initial, today }: { initial: Init; today: string }) {
   const [basic, setBasic] = useState(initial.basic);
-  const [allowances, setAllowances] = useState(initial.allowances);
+  const [allowanceRows, setAllowanceRows] = useState<AllowanceRow[]>(initial.items);
   const [bonus, setBonus] = useState("");
   const [overtime, setOvertime] = useState("");
   const [tier3, setTier3] = useState(initial.tier3Pct);
   const [other, setOther] = useState("");
   const tier3Pct = Math.min(50, Math.max(0, Number(tier3) || 0));
+  const items = rowsToItems(allowanceRows);
+  const monthlyAllowances = items.filter((a) => a.per === "month").reduce((s, a) => s + a.amount, 0);
+  const year = yearOfPay({ basic: toMinor(basic), items, tier3Pct, date: today });
+  const lumpy = Boolean(year.quarterMonth || year.yearMonth);
   const p = calculatePay({
     basic: toMinor(basic),
-    allowances: toMinor(allowances),
+    allowances: monthlyAllowances,
     bonus: toMinor(bonus),
     overtime: toMinor(overtime),
     tier3Pct,
@@ -46,11 +51,10 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
   });
   const has = toMinor(basic) > 0;
   const oneOffs = toMinor(bonus) + toMinor(overtime) + toMinor(other) > 0;
-  const regular = oneOffs ? calculatePay({ basic: toMinor(basic), allowances: toMinor(allowances), tier3Pct, date: today }) : p;
 
   const rows: [string, number, string?][] = [
     ["Basic salary", toMinor(basic)],
-    ...(toMinor(allowances) ? ([["Allowances", toMinor(allowances)]] as [string, number][]) : []),
+    ...(monthlyAllowances ? ([[lumpy ? "Monthly allowances" : "Allowances", monthlyAllowances]] as [string, number][]) : []),
     ...(toMinor(bonus) ? ([["Bonus", toMinor(bonus)]] as [string, number][]) : []),
     ...(toMinor(overtime) ? ([["Overtime", toMinor(overtime)]] as [string, number][]) : []),
     ["Gross pay", p.gross, "sum"],
@@ -72,9 +76,8 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
         </div>
         <div className="sk-card sk-card--pad sk-stack">
           <b className="sk-h">Every month</b>
-          <div className="sk-grid g-3" style={{ gap: 12 }}>
-            <Money id="basic" label="Basic salary" value={basic} set={setBasic} />
-            <Money id="allowances" label="Allowances" value={allowances} set={setAllowances} hint="Transport, rent, etc." />
+          <div className="sk-grid g-2" style={{ gap: 12 }}>
+            <Money id="basic" label="Basic salary (monthly)" value={basic} set={setBasic} />
             <div className="sk-field">
               <label htmlFor="tier3Pct">Tier 3 (your %)</label>
               <div className="sk-input sk-input--sm">
@@ -84,6 +87,8 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
               <span className="sk-cap">Voluntary. Tax-free up to {TIER3_RELIEF_CAP * 100}%</span>
             </div>
           </div>
+          <AllowanceList rows={allowanceRows} onChange={setAllowanceRows} afterTax={has ? year.allowances : undefined} />
+          <span className="sk-cap">Transport, rent, fuel, clothing… Pick how often each is paid; we&apos;ll do the maths.</span>
         </div>
         <div className="sk-card sk-card--pad sk-stack">
           <div>
@@ -146,12 +151,14 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
       <aside className="sk-stack" style={{ gap: 16, position: "sticky", top: 16 }}>
         <div className="sk-hero sk-stack" style={{ gap: 6 }}>
           <div className="sk-hero__deco" />
-          <div className="sk-over">Take-home pay</div>
+          <div className="sk-over">{lumpy ? "Take-home in a usual month" : "Take-home pay"}</div>
           <span className="sk-num" style={{ fontSize: 40, lineHeight: "44px" }}>
             <span className="sk-cur">GH₵</span>
             {f2(Math.max(0, p.net))}
           </span>
-          <div className="sk-cap">{has ? `${Math.round((p.net / Math.max(1, p.gross)) * 100)}% of GH₵ ${f2(p.gross)} gross` : "Enter your basic salary"}</div>
+          <div className="sk-cap">
+            {!has ? "Enter your basic salary" : lumpy ? `GH₵ ${f2(year.averageNet)} a month on average over the year` : `${Math.round((p.net / Math.max(1, p.gross)) * 100)}% of GH₵ ${f2(p.gross)} gross`}
+          </div>
         </div>
         {has ? (
           <div className="sk-card sk-card--pad">
@@ -171,6 +178,34 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
             </dl>
           </div>
         ) : null}
+        {has && lumpy ? (
+          <div className="sk-card sk-card--pad sk-stack" style={{ gap: 6 }}>
+            <b>Across the year</b>
+            <p className="sk-cap">Quarterly and yearly allowances are taxed in the month they&apos;re paid, so those payslips are bigger and taxed more.</p>
+            <dl style={{ margin: 0 }}>
+              {(
+                [
+                  ["Usual month", year.usual.net, `×${12 - (year.quarterMonth ? 4 : 0) - (year.yearMonth ? 1 : 0)}`],
+                  ...(year.quarterMonth ? ([["Month with quarterly allowances", year.quarterMonth.net, "×4"]] as const) : []),
+                  ...(year.yearMonth ? ([["Month with yearly allowances", year.yearMonth.net, "×1"]] as const) : []),
+                ] as const
+              ).map(([k, v, n]) => (
+                <div key={k} className="sk-between" style={{ padding: "5px 0" }}>
+                  <dt className="sk-cap">{k} <span style={{ opacity: 0.7 }}>{n}</span></dt>
+                  <dd style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>{f2(v)}</dd>
+                </div>
+              ))}
+              <div className="sk-between" style={{ padding: "7px 0", borderTop: "1px solid var(--line)" }}>
+                <dt className="sk-cap">Tax for the year</dt>
+                <dd style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>{f2(year.annualTax)}</dd>
+              </div>
+              <div className="sk-between" style={{ padding: "7px 0", borderTop: "1px solid var(--line)", fontWeight: 700 }}>
+                <dt>Average a month</dt>
+                <dd style={{ margin: 0, fontVariantNumeric: "tabular-nums" }} className="t-income">{f2(year.averageNet)}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
         {has ? (
           <div className="sk-card sk-card--flat sk-card--pad sk-stack" style={{ gap: 6 }}>
             <b>Your pension, paid by you and your employer</b>
@@ -182,10 +217,21 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
         ) : null}
         <ActionForm action={saveTakeHomeFromGross} showOk className="sk-stack">
           <input type="hidden" name="basic" value={basic} />
-          <input type="hidden" name="allowances" value={allowances} />
           <input type="hidden" name="tier3Pct" value={tier3} />
-          <Submit pendingText="Saving…">Use GH₵ {f2(Math.max(0, regular.net))} as my monthly take-home</Submit>
-          {oneOffs ? <span className="sk-cap">Bonus, overtime and other deductions are left out; they don&apos;t happen every month.</span> : null}
+          {allowanceRows.map((r, i) => (
+            <span key={i} hidden>
+              <input type="hidden" name="allowanceName" value={r.name} />
+              <input type="hidden" name="allowanceAmount" value={r.amount} />
+              <input type="hidden" name="allowancePer" value={r.per} />
+            </span>
+          ))}
+          <Submit pendingText="Saving…">Use GH₵ {f2(Math.max(0, year.averageNet))} as my monthly take-home</Submit>
+          {lumpy || oneOffs ? (
+            <span className="sk-cap">
+              {lumpy ? "That's your average month, so lump sums are spread across the plan. " : ""}
+              {oneOffs ? "Bonus, overtime and other deductions are left out; they don't happen every month." : ""}
+            </span>
+          ) : null}
         </ActionForm>
         <p className="sk-cap">
           {p.table.label}, SSNIT and Tier 3 rules for resident employees. This is an estimate, not tax advice. Your employer&apos;s payroll may round differently.

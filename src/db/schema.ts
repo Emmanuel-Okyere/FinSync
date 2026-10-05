@@ -23,7 +23,9 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull(
 export type Bucket = { key: string; name: string; pct: number };
 export type Scheme = { id: string; name: string; buckets: Bucket[] };
 
-export type PayslipInput = { basic: number; allowances: number; tier3Pct: number };
+export type PayslipAllowance = { name?: string; amount: number; per: "month" | "quarter" | "year" };
+// `allowances` is the monthly equivalent (kept for older rows); `items` holds each allowance and how often it's paid.
+export type PayslipInput = { basic: number; allowances: number; tier3Pct: number; items?: PayslipAllowance[] };
 
 export type UserSettings = {
   overBudgetAlerts: boolean;
@@ -60,6 +62,8 @@ export const users = pgTable(
     sessionVersion: integer("session_version").notNull().default(0),
     paydayRule: text("payday_rule").notNull().default("last_working_day"),
     paydayDay: integer("payday_day"),
+    // For fixed-date paydays that land on a weekend: before (Friday) | after (Monday) | same.
+    paydayWeekend: text("payday_weekend").notNull().default("before"),
     currency: text("currency").notNull().default("GHS"),
     scheme: jsonb("scheme").$type<Scheme>(),
     settings: jsonb("settings").$type<UserSettings>().notNull().default(defaultSettings),

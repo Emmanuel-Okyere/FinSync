@@ -59,6 +59,12 @@ npm run test:paye
 
 The server always recomputes take-home from the gross inputs; it never trusts a figure sent by the browser.
 
+Allowances can be monthly, quarterly or yearly. PAYE is withheld on what's paid each month, so `yearOfPay()` models a year (quarterly allowances in 4 months, yearly in 1 other month), taxes each month separately, and budgets with the 12-month average. Each allowance's "you keep" figure is its share of the extra PAYE its group adds to the month it's paid in (split by amount), so the per-allowance tax adds up exactly to the total.
+
 ## Legal pages
 
 `/terms` and `/privacy` read the operator name and contact email from `LEGAL_OPERATOR_NAME` and `SUPPORT_EMAIL`. Have them reviewed by a lawyer before launch, and register with Ghana's Data Protection Commission as a data controller.
+
+## Paydays
+
+Payday can be the 25th, the last working day, weekly (Fridays) or a set date. For the 25th and set dates, users choose what happens when it lands on a weekend: Friday before (default), Monday after, or on the day. `nextPaydayDetail()` in `src/lib/dates.ts` applies the shift (including across month ends) and drives "payday in N days" and safe-to-spend. Public holidays are not shifted yet. Run `npm test` for the payday and tax checks.

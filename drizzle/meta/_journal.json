@@ -15,6 +15,13 @@
       "when": 1791200180252,
       "tag": "0001_income_payslip",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791201632173,
+      "tag": "0002_payday_weekend",
+      "breakpoints": true
     }
   ]
 }

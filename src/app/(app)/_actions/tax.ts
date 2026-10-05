@@ -6,21 +6,14 @@ import { incomes } from "@/db/schema";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { todayISO } from "@/lib/dates";
-import { cedis, parseMoney } from "@/lib/money";
-import { calculatePay } from "@/lib/paye";
+import { cedis } from "@/lib/money";
+import { parsePayslipForm } from "@/lib/payslip-form";
 
-/** Saves the regular monthly take-home (basic + allowances + Tier 3) as the main income. Bonus/overtime are one-offs. */
+/** Saves the average monthly take-home (basic, allowances at their frequencies, Tier 3) as the main income. Bonus/overtime are one-offs. */
 export async function saveTakeHomeFromGross(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
-    const basic = parseMoney(String(fd.get("basic") ?? ""));
-    const allowances = parseMoney(String(fd.get("allowances") ?? "") || "0");
-    const tier3Pct = Number(String(fd.get("tier3Pct") ?? "").trim() || "0");
-    if (basic == null || basic <= 0) throw new UserError("Enter your basic salary first.");
-    if (allowances == null) throw new UserError("Allowances: enter a number like 500");
-    if (!Number.isFinite(tier3Pct) || tier3Pct < 0 || tier3Pct > 50) throw new UserError("Tier 3: enter a percentage between 0 and 50");
-    const payslip = { basic, allowances, tier3Pct };
-    const net = calculatePay({ ...payslip, date: todayISO() }).net;
+    const { payslip, net } = parsePayslipForm(fd, todayISO());
     if (net <= 0) throw new UserError("That leaves nothing to take home.");
 
     const [main] = await db

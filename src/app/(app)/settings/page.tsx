@@ -5,12 +5,13 @@ import { incomes } from "@/db/schema";
 import { signOut } from "@/app/(auth)/actions";
 import { saveIncome } from "@/app/setup/actions";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { paydayLabel } from "@/lib/dates";
+import { paydayLabel, weekendLabel, type WeekendShift } from "@/lib/dates";
 import { otpEnabled } from "@/lib/env";
 import { membershipOf } from "@/lib/household";
 import { displayPhone } from "@/lib/phone";
 import { schemeLabel } from "@/lib/schemes";
 import { toInputValue } from "@/lib/money";
+import { payslipItems } from "@/lib/payslip-form";
 import { ActionForm, Dialog, Field, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { PageHead } from "@/components/app/PageHead";
@@ -91,7 +92,7 @@ export default async function Settings() {
             <Dialog
               title="Income and payday"
               triggerClassName="sk-tx"
-              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}</span><Icon name="next" /></>}
+              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}{(user.paydayRule === "25th" || user.paydayRule === "date") && user.paydayWeekend !== "same" ? ` · ${weekendLabel[user.paydayWeekend as WeekendShift]} if on a weekend` : ""}</span><Icon name="next" /></>}
             >
               <IncomeForm
                 action={saveIncome}
@@ -102,7 +103,8 @@ export default async function Settings() {
                   kind: main?.kind ?? "salary",
                   payday: user.paydayRule,
                   paydayDay: user.paydayDay,
-                  payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), allowances: main.payslip.allowances ? toInputValue(main.payslip.allowances) : "", tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "" } : null,
+                  paydayWeekend: user.paydayWeekend,
+                  payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })) } : null,
                   extras: incomeRows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor) })),
                 }}
               />
