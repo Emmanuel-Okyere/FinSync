@@ -16,6 +16,7 @@ import { looksLikeEmail, normalizePhone } from "@/lib/phone";
 import { enforce } from "@/lib/rate-limit";
 import { phoneAllowedForSms } from "@/lib/sms/giant";
 import { otpEnabled } from "@/lib/env";
+import { flash } from "@/lib/flash";
 
 function requireOtp() {
   if (!otpEnabled()) throw new UserError("SMS codes are switched off. Sign in with your password.");
@@ -67,6 +68,7 @@ export async function signUp(_: FormState, fd: FormData): Promise<FormState> {
       if (!created) throw new UserError("This number already has an account. Sign in instead.", "phone");
       await ensureCategories(created.id);
       await startSession(created, true);
+      await flash(`Welcome to FinSync, ${created.firstName}! Let's set up your month.`);
       redirect("/setup/income");
     }
 
@@ -82,6 +84,7 @@ export async function signUp(_: FormState, fd: FormData): Promise<FormState> {
       .returning({ id: pendingSignups.id });
     await sendOtp(d.phone, "verify_phone", ip);
     await setPending({ phone: d.phone, purpose: "verify_phone", remember: true, signupId: pending.id });
+    await flash("We texted you a 6-digit code.");
     redirect("/verify");
   });
 }
@@ -110,6 +113,7 @@ export async function signIn(_: FormState, fd: FormData): Promise<FormState> {
     if (!user || !ok) throw new UserError("That phone/email and password don't match.");
 
     await startSession(user, d.remember === "on");
+    await flash(`Welcome back, ${user.firstName}!`);
     redirect(user.onboardedAt ? safeNext(d.next) : "/setup/income");
   });
 }
@@ -125,6 +129,7 @@ export async function requestLoginCode(_: FormState, fd: FormData): Promise<Form
     const [user] = await db.select({ v: users.phoneVerifiedAt }).from(users).where(eq(users.phone, phone));
     if (user?.v) await sendOtp(phone, "login", ip);
     await setPending({ phone, purpose: "login", remember: false, next: safeNext(next) });
+    await flash("If that number has an account, a code is on its way.");
     redirect("/verify");
   });
 }
@@ -139,6 +144,7 @@ export async function requestReset(_: FormState, fd: FormData): Promise<FormStat
     const [user] = await db.select({ v: users.phoneVerifiedAt }).from(users).where(eq(users.phone, phone));
     if (user?.v) await sendOtp(phone, "reset_password", ip);
     await setPending({ phone, purpose: "reset_password", remember: false });
+    await flash("If that number has an account, a code is on its way.");
     redirect("/verify");
   });
 }
@@ -194,6 +200,7 @@ export async function verifyCode(_: FormState, fd: FormData): Promise<FormState>
       if (!created) throw new UserError("This number already has an account. Sign in instead.");
       await ensureCategories(created.id);
       await startSession(created, p.remember);
+      await flash(`Number confirmed. Welcome to FinSync, ${created.firstName}!`);
       redirect("/setup/income");
     }
 
@@ -202,9 +209,11 @@ export async function verifyCode(_: FormState, fd: FormData): Promise<FormState>
 
     if (p.purpose === "login") {
       await startSession(user, false);
+      await flash(`Welcome back, ${user.firstName}!`);
       redirect(user.onboardedAt ? safeNext(p.next) : "/setup/income");
     }
     await setResetGrant(user.id, user.sessionVersion);
+    await flash("Code accepted. Choose a new password.");
     redirect("/forgot/new");
   });
 }
@@ -229,11 +238,13 @@ export async function setNewPassword(_: FormState, fd: FormData): Promise<FormSt
     await revokeAllForUser(user.id);
     await clearResetGrant();
     await startSession(updated, false);
+    await flash("Password updated. You're signed in.");
     redirect("/home");
   });
 }
 
 export async function signOut() {
   await endSession();
+  await flash("You're signed out. See you soon!");
   redirect("/");
 }

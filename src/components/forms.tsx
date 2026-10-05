@@ -1,12 +1,52 @@
 "use client";
 
-import { createContext, startTransition, useActionState, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import type { FormState } from "@/lib/action";
 import { Icon } from "./Icon";
+import { useConfirm, useToast } from "./feedback";
 
 type Action = (prev: FormState, fd: FormData) => Promise<FormState>;
 const Ctx = createContext<FormState & { pending?: boolean }>({});
+
+/**
+ * Runs a server action and reports the result through the app-wide toast host.
+ * Toasts fire from the action's completion, not from a component effect, so they still show
+ * when the triggering element disappears (e.g. deleting the row the button lives in).
+ */
+export function useServerAction(
+  action: Action,
+  opts: { toastOk?: boolean; toastError?: boolean; onDone?: (s: FormState) => void } = {},
+) {
+  const [state, setState] = useState<FormState>({});
+  const [pending, start] = useTransition();
+  const toast = useToast();
+  const latest = useRef(state);
+  const optsRef = useRef(opts);
+  useEffect(() => {
+    optsRef.current = opts;
+  });
+  const run = useCallback(
+    (fd: FormData) =>
+      start(async () => {
+        let next: FormState;
+        try {
+          next = await action(latest.current, fd);
+        } catch {
+          next = { error: "Couldn't reach FinSync. Check your connection and try again.", at: Date.now() };
+        }
+        if (!next) return; // redirected
+        latest.current = next;
+        setState(next);
+        const o = optsRef.current;
+        if (next.ok && o.toastOk !== false) toast(next.ok);
+        if (next.error && o.toastError) toast(next.error, "error");
+        o.onDone?.(next);
+      }),
+    [action, toast],
+  );
+  return [state, run, pending] as const;
+}
 
 export function ActionForm({
   action,
@@ -14,7 +54,8 @@ export function ActionForm({
   className,
   style,
   reset = false,
-  showOk = false,
+  silent = false,
+  keepOpen = false,
   onOk,
 }: {
   action: Action;
@@ -22,40 +63,37 @@ export function ActionForm({
   className?: string;
   style?: React.CSSProperties;
   reset?: boolean;
-  showOk?: boolean;
+  /** Don't toast on success (rare; e.g. when the page itself shows the result). */
+  silent?: boolean;
+  /** Leave the surrounding dialog open on success (multi-step forms). */
+  keepOpen?: boolean;
   onOk?: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(action, {});
   const ref = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (!state.ok) return;
-    if (reset) ref.current?.reset();
-    ref.current?.closest("dialog")?.close();
-    onOk?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  const [state, run, pending] = useServerAction(action, {
+    toastOk: !silent,
+    onDone: (s) => {
+      if (!s.ok) return;
+      if (reset) ref.current?.reset();
+      if (!keepOpen) ref.current?.closest("dialog")?.close();
+      onOk?.();
+    },
+  });
   return (
     <Ctx.Provider value={{ ...state, pending }}>
       <form
         ref={ref}
-        action={formAction}
         className={className}
         style={style}
         onSubmit={(e) => {
-          // Submit manually so React doesn't auto-reset the fields when the server returns an error.
+          // Submitted by hand: keeps typed values after a server error (no auto-reset).
           e.preventDefault();
-          const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter);
-          startTransition(() => formAction(fd));
+          run(new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter));
         }}
       >
         {state.error && !state.fields ? (
           <div className="sk-alert" role="alert">
             {state.error}
-          </div>
-        ) : null}
-        {showOk && state.ok ? (
-          <div className="sk-alert sk-alert--ok" role="status">
-            {state.ok}
           </div>
         ) : null}
         {children}
@@ -234,7 +272,9 @@ export function Dialog({
   );
 }
 
-/** A one-button form (toggle, delete, move…). */
+type ConfirmSpec = string | { title: string; body?: string; confirmLabel?: string; danger?: boolean };
+
+/** A one-button form (toggle, delete, move…). Confirms in a modal when asked, then toasts the outcome. */
 export function ActionButton({
   action,
   fields,
@@ -247,29 +287,37 @@ export function ActionButton({
   fields: Record<string, string>;
   children: ReactNode;
   className?: string;
-  confirm?: string;
+  confirm?: ConfirmSpec;
   ariaLabel?: string;
 }) {
-  const [state, formAction, pending] = useActionState(action, {});
+  const ask = useConfirm();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [, run, pending] = useServerAction(action, {
+    toastError: true,
+    onDone: (s) => {
+      if (s.ok) formRef.current?.closest("dialog")?.close();
+    },
+  });
   return (
     <form
-      action={formAction}
+      ref={formRef}
       style={{ display: "contents" }}
-      onSubmit={(e) => {
-        if (confirm && !window.confirm(confirm)) e.preventDefault();
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        if (confirm) {
+          const spec = typeof confirm === "string" ? { title: confirm } : confirm;
+          if (!(await ask({ confirmLabel: "Confirm", ...spec }))) return;
+        }
+        run(fd);
       }}
     >
       {Object.entries(fields).map(([k, v]) => (
         <input key={k} type="hidden" name={k} value={v} />
       ))}
-      <button type="submit" className={className} disabled={pending} aria-label={ariaLabel} title={state.error}>
+      <button type="submit" className={className} disabled={pending} aria-busy={pending} aria-label={ariaLabel}>
         {children}
       </button>
-      {state.error ? (
-        <span className="sk-err" role="alert">
-          {state.error}
-        </span>
-      ) : null}
     </form>
   );
 }

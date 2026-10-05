@@ -157,7 +157,7 @@ export function VerifyForm() {
         <Field name="code" label="6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required placeholder="••••••" />
         <Submit pendingText="Checking…">Continue</Submit>
       </ActionForm>
-      <ActionForm action={resendCode} showOk>
+      <ActionForm action={resendCode}>
         <Submit className="sk-btn sk-btn--ghost sk-btn--block" pendingText="Sending…">
           Send a new code
         </Submit>

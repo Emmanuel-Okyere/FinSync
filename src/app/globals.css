@@ -306,3 +306,28 @@ details > summary::-webkit-details-marker { display: none; }
   .sk-allow__amt { padding: 0 12px; }
   .sk-allow__per { padding: 0 6px 0 10px !important; font-size: 14px; }
 }
+
+/* Toasts */
+.sk-toasts { position: fixed; right: 24px; bottom: 24px; z-index: 100; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; pointer-events: none; }
+.sk-toast { pointer-events: auto; display: flex; align-items: center; gap: 12px; min-width: 260px; max-width: min(420px, calc(100vw - 32px)); padding: 12px 12px 12px 14px; border-radius: var(--radius-md); background: var(--ink); color: var(--canvas); box-shadow: var(--shadow-float); font-weight: 600; font-size: 14px; line-height: 20px; animation: sk-toast-in .22s ease-out; }
+.sk-toast.is-leaving { animation: sk-toast-out .2s ease-in forwards; }
+.sk-toast__icon { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--income); color: #fff; }
+.sk-toast--error .sk-toast__icon { background: var(--expense); }
+.sk-toast__icon .ic { width: 16px; height: 16px; }
+.sk-toast__msg { flex: 1; min-width: 0; }
+.sk-toast__close { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; color: inherit; opacity: .7; display: grid; place-items: center; cursor: pointer; }
+.sk-toast__close:hover { opacity: 1; background: rgba(127,127,127,.2); }
+.sk-toast__close .ic { width: 16px; height: 16px; }
+@keyframes sk-toast-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes sk-toast-out { to { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .sk-toast, .sk-toast.is-leaving { animation: none; } }
+@media (max-width: 900px) {
+  .sk-toasts { left: 16px; right: 16px; bottom: calc(92px + env(safe-area-inset-bottom)); align-items: stretch; }
+  .sk-toast { max-width: none; }
+}
+
+/* Confirm modal */
+dialog.sk-confirm { max-width: 420px; }
+@media (max-width: 900px) { dialog.sk-confirm { margin: auto 0 0; max-width: 100%; } }
+.sk-btn--destructive { background: var(--expense); color: var(--canvas); }
+.sk-btn--destructive:hover { background: var(--expense); color: var(--canvas); filter: brightness(.92); }

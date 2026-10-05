@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { ActionButton } from "@/components/forms";
+import { ActionButton, useServerAction } from "@/components/forms";
 import { removeLine, setLineActual, setLinePlanned, toggleLine } from "@/app/(app)/_actions/budget";
 import type { LineView } from "@/lib/budget";
 
@@ -29,11 +29,17 @@ function Check({ l }: { l: LineView }) {
 /** Inline money cell that saves on blur / Enter. */
 function MoneyCell({ l, field }: { l: LineView; field: "planned" | "actual" }) {
   const action = field === "planned" ? setLinePlanned : setLineActual;
-  const [state, formAction, pending] = useActionState(action, {});
+  const [state, run, pending] = useServerAction(action, { toastError: true });
   const initial = (l[field] / 100).toFixed(2);
   const [val, setVal] = useState(initial);
   return (
-    <form action={formAction} style={{ display: "inline" }}>
+    <form
+      style={{ display: "inline" }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        run(new FormData(e.currentTarget));
+      }}
+    >
       <input type="hidden" name="id" value={l.id} />
       <input
         className="sk-cellin"
@@ -50,7 +56,6 @@ function MoneyCell({ l, field }: { l: LineView; field: "planned" | "actual" }) {
           if (val !== initial) e.currentTarget.form?.requestSubmit();
         }}
       />
-      {state.error ? <div className="sk-err" role="alert" style={{ fontSize: 12 }}>{state.error}</div> : null}
     </form>
   );
 }
@@ -91,7 +96,7 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
                 <td className="r"><MoneyCell key={`a-${l.actual}`} l={l} field="actual" /></td>
                 <td className="r"><Diff l={l} /></td>
                 <td className="r">
-                  <ActionButton action={removeLine} fields={{ id: l.id }} className="sk-iconbtn" ariaLabel={`Remove ${l.name} from this month`} confirm={`Remove ${l.name} from this month? Its entries stay.`}>
+                  <ActionButton action={removeLine} fields={{ id: l.id }} className="sk-iconbtn" ariaLabel={`Remove ${l.name} from this month`} confirm={{ title: `Remove ${l.name} from this month?`, body: "Its entries stay in your transactions; only the plan line goes.", confirmLabel: "Remove", danger: true }}>
                     <Icon name="trash" />
                   </ActionButton>
                 </td>

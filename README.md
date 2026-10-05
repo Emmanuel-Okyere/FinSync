@@ -72,3 +72,7 @@ Allowances can be monthly, quarterly or yearly. PAYE is withheld on what's paid 
 ## Paydays
 
 Payday can be the 25th, the last working day, weekly (Fridays) or a set date. For the 25th and set dates, users choose what happens when it lands on a weekend: Friday before (default), Monday after, or on the day. `nextPaydayDetail()` in `src/lib/dates.ts` applies the shift (including across month ends) and drives "payday in N days" and safe-to-spend. Public holidays are not shifted yet. Run `npm test` for the payday and tax checks.
+
+## Feedback: toasts and confirmations
+
+Every action that changes data reports back with a toast (`components/feedback.tsx`); page loads and searches don't. Forms and buttons go through `useServerAction()`, which fires the toast when the action completes, so it still shows when the triggering element disappears (e.g. deleting the row you clicked). Actions that redirect call `flash()` (`src/lib/flash.ts`), a 30-second cookie the next page turns into a toast. Destructive actions use the in-app confirm modal (`useConfirm()` / `ActionButton confirm={…}`), never `window.confirm`.

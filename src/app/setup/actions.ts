@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { budgetMonths, categories, fixedExpenses, incomes, users, type PayslipInput } from "@/db/schema";
 import { parsePayslipForm } from "@/lib/payslip-form";
+import { flash } from "@/lib/flash";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { ensureCategories } from "@/lib/budget";
@@ -54,6 +55,7 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
       db.update(users).set({ paydayRule: payday, paydayDay, paydayWeekend, updatedAt: new Date() }).where(eq(users.id, user.id)),
     ]);
     if (fd.get("returnTo") === "settings") return "Income saved";
+    await flash("Income saved");
     redirect("/setup/scheme");
   });
 }
@@ -63,6 +65,7 @@ export async function saveScheme(_: FormState, fd: FormData): Promise<FormState>
     const user = await actionUser();
     const scheme = parseSchemeForm(fd);
     await db.update(users).set({ scheme, updatedAt: new Date() }).where(eq(users.id, user.id));
+    await flash(`${scheme.name} it is`);
     redirect("/setup/fixed");
   });
 }
@@ -102,6 +105,7 @@ export async function saveFixed(_: FormState, fd: FormData): Promise<FormState> 
       db.delete(budgetMonths).where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, month))),
       db.update(users).set({ onboardedAt: user.onboardedAt ?? new Date(), updatedAt: new Date() }).where(eq(users.id, user.id)),
     ] as unknown as Parameters<typeof db.batch>[0]);
+    await flash("You're all set. Here's your month.");
     redirect("/home");
   });
 }
@@ -109,5 +113,6 @@ export async function saveFixed(_: FormState, fd: FormData): Promise<FormState> 
 export async function finishLater() {
   const user = await actionUser();
   await db.update(users).set({ onboardedAt: user.onboardedAt ?? new Date() }).where(eq(users.id, user.id));
+  await flash("Saved. You can finish setup any time in Settings.");
   redirect("/home");
 }

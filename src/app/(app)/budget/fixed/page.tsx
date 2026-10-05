@@ -81,7 +81,7 @@ export default async function Fixed() {
                     {form(f)}
                     <div className="sk-grid g-2" style={{ gap: 10 }}>
                       <ActionButton action={toggleFixedExpense} fields={{ id: f.id }} className="sk-btn sk-btn--ghost">{f.active ? "Pause" : "Resume"}</ActionButton>
-                      <ActionButton action={deleteFixedExpense} fields={{ id: f.id }} className="sk-btn sk-btn--danger" confirm={`Delete ${f.name}? Past entries stay.`}>Delete</ActionButton>
+                      <ActionButton action={deleteFixedExpense} fields={{ id: f.id }} className="sk-btn sk-btn--danger" confirm={{ title: `Delete ${f.name}?`, body: "It won't be added to future budgets. Past entries stay.", confirmLabel: "Delete", danger: true }}>Delete</ActionButton>
                     </div>
                   </Dialog>
                 </div>

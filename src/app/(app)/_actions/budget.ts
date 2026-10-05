@@ -291,11 +291,13 @@ export async function toggleFixedExpense(_: FormState, fd: FormData): Promise<Fo
   return run(async () => {
     const user = await actionUser();
     const id = zUuid.parse(fd.get("id"));
-    await db
+    const [f] = await db
       .update(fixedExpenses)
       .set({ active: sql`NOT ${fixedExpenses.active}` })
-      .where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, user.id)));
-    return "Updated";
+      .where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, user.id)))
+      .returning({ name: fixedExpenses.name, active: fixedExpenses.active });
+    if (!f) throw new UserError("That fixed expense no longer exists.");
+    return f.active ? `${f.name} resumed` : `${f.name} paused`;
   });
 }
 

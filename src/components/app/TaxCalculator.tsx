@@ -229,7 +229,7 @@ export function TaxCalculator({ initial, today }: { initial: Init; today: string
             <p className="sk-cap">Tier 2 comes out of that 18.5%; it isn&apos;t taken from your pay a second time.</p>
           </div>
         ) : null}
-        <ActionForm action={saveTakeHomeFromGross} showOk className="sk-stack">
+        <ActionForm action={saveTakeHomeFromGross} className="sk-stack">
           <input type="hidden" name="basic" value={basic} />
           <input type="hidden" name="tier3Pct" value={tier3} />
           <input type="hidden" name="taxableBenefits" value={benefits} />

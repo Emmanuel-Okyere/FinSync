@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { ActionForm, FieldError, Submit } from "@/components/forms";
+import { ActionButton, ActionForm, FieldError, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { addEntry, deleteEntry, updateEntry } from "@/app/(app)/_actions/transactions";
 
@@ -140,19 +140,15 @@ export function EntryForm({
         <Submit className="sk-btn sk-btn--gold sk-btn--block">{initial ? "Save changes" : kind === "income" ? "Save income" : "Save expense"}</Submit>
       </ActionForm>
       {initial ? (
-        <ActionForm action={deleteEntry}>
-          <input type="hidden" name="id" value={initial.id} />
-          <button
-            type="submit"
-            className="sk-btn sk-btn--danger sk-btn--block"
-            onClick={(e) => {
-              if (!window.confirm("Delete this entry?")) e.preventDefault();
-            }}
-          >
-            <Icon name="trash" />
-            Delete entry
-          </button>
-        </ActionForm>
+        <ActionButton
+          action={deleteEntry}
+          fields={{ id: initial.id }}
+          className="sk-btn sk-btn--danger sk-btn--block"
+          confirm={{ title: `Delete “${initial.name}”?`, body: "It will be removed from your budget and reports. This can't be undone.", confirmLabel: "Delete", danger: true }}
+        >
+          <Icon name="trash" />
+          Delete entry
+        </ActionButton>
       ) : null}
     </>
   );

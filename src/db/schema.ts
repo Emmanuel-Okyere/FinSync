@@ -170,6 +170,8 @@ export const budgetMonths = pgTable(
     month: date("month").notNull(), // first day of month, YYYY-MM-01
     scheme: jsonb("scheme").$type<Scheme>().notNull(),
     incomeMinor: money("income_minor").notNull(),
+    // Fixed expenses already auto-logged this month. Deleting the entry won't bring it back.
+    loggedFixed: jsonb("logged_fixed").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("budget_months_user_month_uq").on(t.userId, t.month)],

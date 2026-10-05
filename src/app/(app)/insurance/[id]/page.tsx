@@ -37,7 +37,7 @@ export default async function PolicyDetail({ params }: { params: Promise<{ id: s
       <PageHead title={p.name} back="/insurance" add={false}>
         <Dialog label={<Icon name="edit" />} ariaLabel="Edit policy" title={`Edit ${p.name}`} triggerClassName="sk-iconbtn">
           <PolicyForm p={p} />
-          <ActionButton action={deletePolicy} fields={{ id: p.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={`Delete ${p.name}?`}>Delete policy</ActionButton>
+          <ActionButton action={deletePolicy} fields={{ id: p.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={{ title: `Delete ${p.name}?`, body: "Its monthly premium will stop being added to your budget. Past entries stay.", confirmLabel: "Delete", danger: true }}>Delete policy</ActionButton>
         </Dialog>
       </PageHead>
       <div className="sk-grid g-2">

@@ -1,0 +1,1 @@
+ALTER TABLE "budget_months" ADD COLUMN "logged_fixed" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -101,7 +101,7 @@ export default async function Savings() {
                         <summary className="sk-link" style={{ cursor: "pointer" }}>Edit details</summary>
                         <div style={{ marginTop: 12 }}><AccountForm a={a} /></div>
                       </details>
-                      <ActionButton action={deleteAccount} fields={{ id: a.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={`Remove ${a.name}?`}>
+                      <ActionButton action={deleteAccount} fields={{ id: a.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={{ title: `Remove ${a.name}?`, body: "Its balance and goal will be removed. Entries you logged stay in your transactions.", confirmLabel: "Remove", danger: true }}>
                         Remove
                       </ActionButton>
                     </Dialog>

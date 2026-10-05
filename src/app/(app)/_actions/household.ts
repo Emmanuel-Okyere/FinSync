@@ -29,7 +29,7 @@ export async function updateHousehold(_: FormState, fd: FormData): Promise<FormS
     if (!m || m.role !== "owner") throw new UserError("Only the owner can change this.");
     const d = z.object({ name: zText(60, "Name"), limit: zMoneyOpt("Monthly limit") }).parse(formObject(fd));
     await db.update(households).set({ name: d.name, monthlyLimitMinor: d.limit ?? 0 }).where(eq(households.id, m.householdId));
-    return "Saved";
+    return "Household settings saved";
   });
 }
 
@@ -106,7 +106,7 @@ export async function settleUp(_: FormState, fd: FormData): Promise<FormState> {
     if (!om) throw new UserError("That person isn't in your household.");
     if (d.amount <= 0) throw new UserError("Enter an amount above zero.");
     await db.insert(householdSettlements).values({ householdId: m.householdId, fromUserId: d.from, toUserId: d.to, amountMinor: d.amount });
-    return "Settled";
+    return "Balance settled";
   });
 }
 
@@ -121,6 +121,6 @@ export async function shareEntry(_: FormState, fd: FormData): Promise<FormState>
       .update(transactions)
       .set({ householdId: shared ? m.householdId : null })
       .where(and(eq(transactions.id, id), eq(transactions.userId, user.id), eq(transactions.kind, "expense")));
-    return "Updated";
+    return shared ? "Shared with your household" : "No longer shared";
   });
 }

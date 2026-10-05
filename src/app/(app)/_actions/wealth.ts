@@ -49,7 +49,7 @@ export async function saveAccount(_: FormState, fd: FormData): Promise<FormState
     } else {
       await db.insert(savingsAccounts).values({ ...values, userId: user.id });
     }
-    return "Saved";
+    return `${d.name} saved`;
   });
 }
 
@@ -57,7 +57,7 @@ export async function deleteAccount(_: FormState, fd: FormData): Promise<FormSta
   return run(async () => {
     const user = await actionUser();
     await db.delete(savingsAccounts).where(and(eq(savingsAccounts.id, zUuid.parse(fd.get("id"))), eq(savingsAccounts.userId, user.id)));
-    return "Removed";
+    return "Savings place removed";
   });
 }
 
@@ -111,7 +111,7 @@ export async function saveDebt(_: FormState, fd: FormData): Promise<FormState> {
     } else {
       await db.insert(debts).values({ ...values, userId: user.id });
     }
-    return "Saved";
+    return `${d.name} saved`;
   });
 }
 
@@ -119,7 +119,7 @@ export async function deleteDebt(_: FormState, fd: FormData): Promise<FormState>
   return run(async () => {
     const user = await actionUser();
     await db.delete(debts).where(and(eq(debts.id, zUuid.parse(fd.get("id"))), eq(debts.userId, user.id)));
-    return "Removed";
+    return "Debt removed";
   });
 }
 
@@ -168,7 +168,7 @@ export async function saveInvestment(_: FormState, fd: FormData): Promise<FormSt
     if (id) {
       const r = await db.update(investments).set({ name: d.name, kind: d.kind, detail: d.detail }).where(and(eq(investments.id, id), eq(investments.userId, user.id))).returning({ id: investments.id });
       if (!r.length) throw new UserError("That investment no longer exists.");
-      return "Saved";
+      return `${d.name} saved`;
     }
     const [inv] = await db.insert(investments).values({ userId: user.id, name: d.name, kind: d.kind, detail: d.detail }).returning();
     const today = todayISO();
@@ -217,7 +217,7 @@ export async function deleteInvestment(_: FormState, fd: FormData): Promise<Form
   return run(async () => {
     const user = await actionUser();
     await db.delete(investments).where(and(eq(investments.id, zUuid.parse(fd.get("id"))), eq(investments.userId, user.id)));
-    return "Removed";
+    return "Investment deleted";
   });
 }
 

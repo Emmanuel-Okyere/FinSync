@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { ACCESS_COOKIE, REFRESH_COOKIE, accessCookieOptions, refreshCookieOptions } from "@/lib/auth/config";
 import { OAUTH_COOKIE, finishGoogle } from "@/lib/auth/google";
+import { FLASH_COOKIE, encodeFlash } from "@/lib/flash-name";
 import { createSession } from "@/lib/auth/refresh";
 import { ensureCategories } from "@/lib/budget";
 import { googleEnabled } from "@/lib/env";
@@ -53,5 +54,6 @@ export async function GET(req: NextRequest) {
   res.cookies.delete(OAUTH_COOKIE);
   res.cookies.set(ACCESS_COOKIE, s.accessToken, accessCookieOptions());
   res.cookies.set(REFRESH_COOKIE, s.refreshToken!, refreshCookieOptions(true));
+  res.cookies.set(FLASH_COOKIE, encodeFlash(`Welcome, ${user.firstName}!`), { httpOnly: false, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 30 });
   return res;
 }

@@ -10,6 +10,7 @@ import { actionUser } from "@/lib/auth/session";
 import { ensureCategories } from "@/lib/budget";
 import { extractRows, parseCsv, rowHash, suggestCategory } from "@/lib/import";
 import { enforce } from "@/lib/rate-limit";
+import { flash } from "@/lib/flash";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 
@@ -52,6 +53,7 @@ export async function uploadStatement(_: FormState, fd: FormData): Promise<FormS
       return { ...r, hash, duplicate, include: !duplicate, categoryId: suggestCategory(r.name, r.kind, byName, learned) };
     });
     const [batch] = await db.insert(importBatches).values({ userId: user.id, source, fileName: name, rows: prepared }).returning({ id: importBatches.id });
+    await flash(`Found ${prepared.length} entr${prepared.length === 1 ? "y" : "ies"}. Check them before importing.`);
     redirect(`/import/${batch.id}`);
   });
 }
@@ -92,6 +94,7 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
         })),
       );
     }
+    await flash(`${chosen.length} entr${chosen.length === 1 ? "y" : "ies"} imported`);
     redirect(`/import/${batch.id}/done`);
   });
 }
@@ -100,6 +103,7 @@ export async function discardImport(_: FormState, fd: FormData): Promise<FormSta
   return run(async () => {
     const user = await actionUser();
     await db.delete(importBatches).where(and(eq(importBatches.id, zUuid.parse(fd.get("id"))), eq(importBatches.userId, user.id), inArray(importBatches.status, ["pending"])));
+    await flash("Import discarded");
     redirect("/import");
   });
 }

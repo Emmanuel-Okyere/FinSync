@@ -13,6 +13,7 @@ import { sendOtp, verifyOtp } from "@/lib/otp";
 import { normalizePhone } from "@/lib/phone";
 import { enforce } from "@/lib/rate-limit";
 import { otpEnabled } from "@/lib/env";
+import { flash } from "@/lib/flash";
 import { phoneAllowedForSms } from "@/lib/sms/giant";
 
 export async function updateProfile(_: FormState, fd: FormData): Promise<FormState> {
@@ -133,6 +134,7 @@ export async function signOutEverywhere() {
   await db.update(users).set({ sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, user.id));
   await revokeAllForUser(user.id);
   await endSession();
+  await flash("Signed out on all devices");
   redirect("/signin");
 }
 
@@ -145,6 +147,7 @@ export async function deleteAccount(_: FormState, fd: FormData): Promise<FormSta
     await endSession();
     // Cascades remove every row the user owns.
     await db.delete(users).where(eq(users.id, user.id));
+    await flash("Your account and all its data were deleted");
     redirect("/");
   });
 }

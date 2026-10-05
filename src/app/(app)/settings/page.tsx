@@ -65,7 +65,7 @@ export default async function Settings() {
                 <summary className="sk-link" style={{ cursor: "pointer" }}>Change phone number</summary>
                 {otpEnabled() ? (
                 <div className="sk-stack" style={{ marginTop: 12 }}>
-                  <ActionForm action={requestPhoneChange} className="sk-stack" showOk>
+                  <ActionForm action={requestPhoneChange} className="sk-stack" keepOpen>
                     <Field name="phone" label="New phone number" type="tel" inputMode="tel" required />
                     <Field name="current" label="Your password" type="password" autoComplete="current-password" />
                     <Submit className="sk-btn sk-btn--ghost sk-btn--block">Text me a code</Submit>
@@ -77,7 +77,7 @@ export default async function Settings() {
                   </ActionForm>
                 </div>
                 ) : (
-                  <ActionForm action={changePhone} className="sk-stack" showOk style={{ marginTop: 12 }}>
+                  <ActionForm action={changePhone} className="sk-stack" style={{ marginTop: 12 }}>
                     <Field name="phone" label="New phone number" type="tel" inputMode="tel" required />
                     {user.passwordHash ? <Field name="current" label="Your password" type="password" autoComplete="current-password" required /> : null}
                     <Submit>Save new number</Submit>
@@ -148,7 +148,7 @@ export default async function Settings() {
           <div className="sk-over">Security</div>
           <div className="sk-card sk-card--pad">
             <Dialog title="Change password" triggerClassName="sk-tx" label={<><span className="sk-tile sk-tile--sm"><Icon name="lock" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Change password</span><Icon name="next" /></>}>
-              <ActionForm action={changePassword} className="sk-stack" showOk reset>
+              <ActionForm action={changePassword} className="sk-stack" reset>
                 {user.passwordHash ? <Field name="current" label="Current password" type="password" autoComplete="current-password" required /> : null}
                 <Field name="password" label="New password" type="password" autoComplete="new-password" required hint="At least 10 characters." />
                 <Submit>Change password</Submit>

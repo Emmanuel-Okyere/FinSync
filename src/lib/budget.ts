@@ -112,14 +112,21 @@ export async function ensureMonth(user: SessionUser, month: string) {
 /** Logs fixed expenses whose day has arrived (once per month, guarded by dedupe key). */
 async function autoLogFixed(user: SessionUser, monthId: string, month: string) {
   if (!user.settings.autoAddFixed) return;
+  const [m] = await db.select({ logged: budgetMonths.loggedFixed }).from(budgetMonths).where(eq(budgetMonths.id, monthId));
+  const already = new Set(m?.logged ?? []);
   const today = todayISO();
   const day = dayOf(today);
   const fixed = await db
     .select()
     .from(fixedExpenses)
     .where(and(eq(fixedExpenses.userId, user.id), eq(fixedExpenses.active, true)));
-  const due = fixed.filter((f) => f.dayOfMonth != null && Math.min(f.dayOfMonth, daysInMonth(month)) <= day);
+  const due = fixed.filter((f) => !already.has(f.id) && f.dayOfMonth != null && Math.min(f.dayOfMonth, daysInMonth(month)) <= day);
   if (!due.length) return;
+  // Record first, so an entry the user deletes later isn't logged again.
+  await db
+    .update(budgetMonths)
+    .set({ loggedFixed: sql`${budgetMonths.loggedFixed} || ${JSON.stringify(due.map((f) => f.id))}::jsonb` })
+    .where(eq(budgetMonths.id, monthId));
   const inserted = await db
     .insert(transactions)
     .values(

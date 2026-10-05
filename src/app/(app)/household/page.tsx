@@ -86,7 +86,7 @@ export default async function Household() {
         </div>
         <span className="sk-cap">{members.map((x) => x.firstName).join(" and ")} ·</span>
         <Dialog label="Invite" title="Invite someone" triggerClassName="sk-link">
-          <ActionForm action={inviteMember} className="sk-stack" reset showOk>
+          <ActionForm action={inviteMember} className="sk-stack" reset>
             <Field name="phone" label="Their phone number" type="tel" inputMode="tel" required placeholder="024 555 0192" />
             <p className="sk-cap">We&apos;ll text them. They join by signing in with that number.</p>
             <Submit>Send invite</Submit>
@@ -140,7 +140,7 @@ export default async function Household() {
                     <b>{owesYou > 0 ? `${o.firstName} owes you GH₵ ${cedis(owesYou)}` : `You owe ${o.firstName} GH₵ ${cedis(-owesYou)}`}</b>
                     <div className="sk-cap">Splits are {split} / {split}</div>
                   </div>
-                  <ActionButton action={settleUp} fields={{ from, to, amount: (Math.abs(owesYou) / 100).toFixed(2) }} confirm="Mark this balance as paid?">Settle up</ActionButton>
+                  <ActionButton action={settleUp} fields={{ from, to, amount: (Math.abs(owesYou) / 100).toFixed(2) }} confirm={{ title: "Mark this balance as paid?", body: "Do this once the money has changed hands. It resets what you owe each other.", confirmLabel: "Settle up" }}>Settle up</ActionButton>
                 </div>
               );
             }

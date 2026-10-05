@@ -38,7 +38,7 @@ export default async function InvestmentDetail({ params }: { params: Promise<{ i
             <Field name="detail" label="Detail" defaultValue={inv.detail ?? ""} maxLength={120} />
             <Submit>Save</Submit>
           </ActionForm>
-          <ActionButton action={deleteInvestment} fields={{ id: inv.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={`Delete ${inv.name} and its history?`}>Delete investment</ActionButton>
+          <ActionButton action={deleteInvestment} fields={{ id: inv.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={{ title: `Delete ${inv.name}?`, body: "This removes it with all its contributions and values. It can't be undone.", confirmLabel: "Delete", danger: true }}>Delete investment</ActionButton>
         </Dialog>
       </PageHead>
       <div className="sk-grid g-main">

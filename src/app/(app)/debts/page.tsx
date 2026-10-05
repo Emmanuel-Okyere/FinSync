@@ -135,7 +135,7 @@ export default async function Debts({ searchParams }: { searchParams: Promise<{ 
                     ) : <span className="sk-tag sk-tag--under"><Icon name="check" />Paid off</span>}
                     <Dialog label="Edit" title={`Edit ${d.name}`} triggerClassName="sk-btn sk-btn--sm sk-btn--quiet">
                       <DebtForm d={d} />
-                      <ActionButton action={deleteDebt} fields={{ id: d.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={`Remove ${d.name}?`}>Remove</ActionButton>
+                      <ActionButton action={deleteDebt} fields={{ id: d.id }} className="sk-btn sk-btn--danger sk-btn--block" confirm={{ title: `Remove ${d.name}?`, body: "Past entries you logged for it stay in your transactions.", confirmLabel: "Remove", danger: true }}>Remove</ActionButton>
                     </Dialog>
                   </div>
                 </div>

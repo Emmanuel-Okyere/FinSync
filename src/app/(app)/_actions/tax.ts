@@ -27,6 +27,6 @@ export async function saveTakeHomeFromGross(_: FormState, fd: FormData): Promise
     } else {
       await db.insert(incomes).values({ userId: user.id, name: "Salary", kind: "salary", amountMinor: net, variable: false, payslip });
     }
-    return `Saved GH₵ ${cedis(net, 2)} as your monthly take-home. New months plan from it; this month keeps its numbers.`;
+    return `Take-home set to GH₵ ${cedis(net, 2)}. New months plan from it.`;
   });
 }
