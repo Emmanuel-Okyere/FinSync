@@ -49,7 +49,7 @@ export function EntryForm({
         <label className="sr-only" htmlFor={`${uid}-entry-amount`}>Amount in cedis</label>
         <div className="sk-amount">
           <span className="sk-cur">GH₵</span>
-          <input id={`${uid}-entry-amount`} name="amount" inputMode="decimal" autoComplete="off" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} required maxLength={14} />
+          <input id={`${uid}-entry-amount`} name="amount" inputMode="decimal" autoComplete="off" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} required maxLength={14} style={{ width: `${Math.max(1, amount.length) + 0.5}ch` }} />
         </div>
         <FieldError name="amount" />
         {kind === "expense" && cat && cat.planned != null && amt > 0 ? (

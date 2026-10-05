@@ -60,6 +60,7 @@ const P: Record<string, string> = {
   logout: "M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3",
   trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
   edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  calculator: "M6 3h12v18H6zM9 7h6M9 11h.01M12 11h.01M15 11h.01M9 14.5h.01M12 14.5h.01M15 14.5h.01M9 18h.01M12 18h3",
 };
 
 export const ICON_NAMES = Object.keys(P);

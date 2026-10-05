@@ -102,11 +102,13 @@ export default async function Settings() {
                   kind: main?.kind ?? "salary",
                   payday: user.paydayRule,
                   paydayDay: user.paydayDay,
+                  payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), allowances: main.payslip.allowances ? toInputValue(main.payslip.allowances) : "", tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "" } : null,
                   extras: incomeRows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor) })),
                 }}
               />
               <p className="sk-cap">New income applies from the next month you open; this month&apos;s plan keeps its numbers.</p>
             </Dialog>
+            <Row icon="calculator" label="Tax and SSNIT calculator" href="/tax" />
             <Row icon="sliders" label="Scheme" value={schemeLabel(user.scheme)} href="/budget#scheme" />
             <Row icon="repeat" label="Fixed expenses" href="/budget/fixed" />
             <Row icon="wallet" label="Currency" value="GH₵ (Ghana cedi)" />

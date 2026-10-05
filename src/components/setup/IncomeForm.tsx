@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import type { FormState } from "@/lib/action";
+import { calculatePay } from "@/lib/paye";
 
 type Extra = { name: string; amount: string };
 const parse = (s: string) => {
@@ -19,11 +20,28 @@ export function IncomeForm({
   returnTo,
 }: {
   action: (p: FormState, fd: FormData) => Promise<FormState>;
-  initial: { main: string; kind: string; payday: string; paydayDay: number | null; extras: Extra[] };
+  initial: {
+    main: string;
+    kind: string;
+    payday: string;
+    paydayDay: number | null;
+    extras: Extra[];
+    payslip?: { basic: string; allowances: string; tier3Pct: string } | null;
+  };
   submitLabel?: string;
   returnTo?: string;
 }) {
-  const [main, setMain] = useState(initial.main);
+  const [netInput, setNetInput] = useState(initial.main);
+  const [kind, setKind] = useState(initial.kind);
+  const [mode, setMode] = useState<"net" | "gross">(initial.payslip ? "gross" : "net");
+  const [basic, setBasic] = useState(initial.payslip?.basic ?? "");
+  const [allowances, setAllowances] = useState(initial.payslip?.allowances ?? "");
+  const [tier3, setTier3] = useState(initial.payslip?.tier3Pct ?? "");
+  const gross = mode === "gross" && kind === "salary";
+  const pay = gross
+    ? calculatePay({ basic: Math.round(parse(basic) * 100), allowances: Math.round(parse(allowances) * 100), tier3Pct: parse(tier3), date: new Date().toISOString().slice(0, 10) })
+    : null;
+  const main = pay ? (parse(basic) ? (pay.net / 100).toFixed(2) : "") : netInput;
   const [payday, setPayday] = useState(initial.payday);
   const [extras, setExtras] = useState<Extra[]>(initial.extras);
   const total = parse(main) + extras.reduce((s, e) => s + parse(e.amount), 0);
@@ -36,8 +54,67 @@ export function IncomeForm({
           <label className="sk-over" htmlFor="main">Main income · after tax and SSNIT</label>
           <div className="sk-amount">
             <span className="sk-cur">GH₵</span>
-            <input id="main" name="main" inputMode="decimal" autoComplete="off" placeholder="0" value={main} onChange={(e) => setMain(e.target.value)} required maxLength={14} />
+            <input
+              id="main"
+              name="main"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="0"
+              value={main}
+              onChange={(e) => setNetInput(e.target.value)}
+              readOnly={gross}
+              style={{ width: `${Math.max(1, main.length) + 0.5}ch` }}
+              aria-describedby={gross ? "main-calc" : undefined}
+              required
+              maxLength={14}
+            />
           </div>
+          <input type="hidden" name="mode" value={gross ? "gross" : "net"} />
+          {kind === "salary" && !gross ? (
+            <button type="button" className="sk-link" style={{ alignSelf: "center", fontSize: 14 }} onClick={() => setMode("gross")}>
+              Only know your gross? Work it out
+            </button>
+          ) : null}
+          {gross && pay ? (
+            <div className="sk-card sk-card--flat sk-stack" style={{ gap: 12 }} id="main-calc">
+              <div className="sk-grid g-3" style={{ gap: 10 }}>
+                <div className="sk-field">
+                  <label htmlFor="basic">Basic salary</label>
+                  <input id="basic" className="sk-input sk-input--sm" name="basic" inputMode="decimal" value={basic} maxLength={14} onChange={(e) => setBasic(e.target.value)} placeholder="0.00" required />
+                </div>
+                <div className="sk-field">
+                  <label htmlFor="allowances">Allowances</label>
+                  <input id="allowances" className="sk-input sk-input--sm" name="allowances" inputMode="decimal" value={allowances} maxLength={14} onChange={(e) => setAllowances(e.target.value)} placeholder="0.00" />
+                </div>
+                <div className="sk-field">
+                  <label htmlFor="tier3Pct">Tier 3 (% of basic)</label>
+                  <input id="tier3Pct" className="sk-input sk-input--sm" name="tier3Pct" inputMode="decimal" value={tier3} maxLength={5} onChange={(e) => setTier3(e.target.value)} placeholder="0" />
+                </div>
+              </div>
+              <dl className="sk-stack" style={{ gap: 6, margin: 0, fontSize: 14 }}>
+                {(
+                  [
+                    ["Gross pay", pay.gross, ""],
+                    ["SSNIT (5.5% of basic)", -pay.ssnit, ""],
+                    ...(pay.tier3 ? ([["Tier 3", -pay.tier3, ""]] as const) : []),
+                    ["Income tax (PAYE)", -pay.paye, ""],
+                    ["Take-home", pay.net, "b"],
+                  ] as const
+                ).map(([k, v, b]) => (
+                  <div key={k} className="sk-between" style={b ? { borderTop: "1px solid var(--line)", paddingTop: 6, fontWeight: 700 } : undefined}>
+                    <dt className={b ? "" : "sk-cap"}>{k}</dt>
+                    <dd style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>{v < 0 ? "−" : ""}{fmt(Math.abs(v) / 100)}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="sk-between sk-wrap" style={{ gap: 8 }}>
+                <span className="sk-cap">{pay.table.label}. An estimate; check it against your payslip.</span>
+                <button type="button" className="sk-link" style={{ fontSize: 14 }} onClick={() => (setNetInput(main), setMode("net"))}>
+                  Enter take-home instead
+                </button>
+              </div>
+            </div>
+          ) : null}
           <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="sk-stack">
             <legend className="sk-label" style={{ marginBottom: 8 }}>What is it?</legend>
             <div className="sk-chips sk-wrap">
@@ -48,7 +125,7 @@ export function IncomeForm({
                 ["other", "Other"],
               ].map(([v, l]) => (
                 <label key={v} className="sk-chip">
-                  <input type="radio" name="kind" value={v} defaultChecked={initial.kind === v} />
+                  <input type="radio" name="kind" value={v} checked={kind === v} onChange={() => setKind(v)} />
                   {l}
                 </label>
               ))}

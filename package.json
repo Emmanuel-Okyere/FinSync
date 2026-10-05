@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:paye": "node --experimental-strip-types --no-warnings scripts/test-paye.mts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",

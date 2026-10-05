@@ -17,6 +17,7 @@ export const SIDE = [
   ["/reports", "Reports", "reports"],
   ["/insights", "Insights", "insights"],
   ["/household", "Household", "users"],
+  ["/tax", "Tax calculator", "calculator"],
 ] as const;
 
 function isOn(path: string, href: string) {

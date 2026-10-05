@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { budgetMonths, categories, fixedExpenses, incomes, users } from "@/db/schema";
+import { budgetMonths, categories, fixedExpenses, incomes, users, type PayslipInput } from "@/db/schema";
+import { calculatePay } from "@/lib/paye";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { ensureCategories } from "@/lib/budget";
@@ -18,9 +19,21 @@ const KIND = z.enum(["salary", "business", "allowance", "other"]);
 export async function saveIncome(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
-    const main = parseMoney(String(fd.get("main") ?? ""));
-    if (main == null || main <= 0) throw new UserError("Enter your take-home pay, like 5800", "main");
     const kind = KIND.parse(fd.get("kind") ?? "salary");
+    let main = parseMoney(String(fd.get("main") ?? ""));
+    let payslip: PayslipInput | null = null;
+    if (fd.get("mode") === "gross" && kind === "salary") {
+      // Never trust the browser's figure: recompute take-home from the gross inputs.
+      const basic = parseMoney(String(fd.get("basic") ?? ""));
+      const allowances = parseMoney(String(fd.get("allowances") ?? "") || "0");
+      const tier3Pct = Number(String(fd.get("tier3Pct") ?? "").trim() || "0");
+      if (basic == null || basic <= 0) throw new UserError("Enter your basic salary, like 6000");
+      if (allowances == null) throw new UserError("Allowances: enter a number like 500");
+      if (!Number.isFinite(tier3Pct) || tier3Pct < 0 || tier3Pct > 50) throw new UserError("Tier 3: enter a percentage between 0 and 50");
+      payslip = { basic, allowances, tier3Pct };
+      main = calculatePay({ ...payslip, date: todayISO() }).net;
+    }
+    if (main == null || main <= 0) throw new UserError("Enter your take-home pay, like 5800", "main");
     const payday = PAYDAY.parse(fd.get("payday") ?? "last_working_day");
     const paydayDay = payday === "date" ? z.coerce.number().int().min(1).max(31).parse(fd.get("paydayDay")) : null;
 
@@ -39,7 +52,7 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
     await db.batch([
       db.delete(incomes).where(eq(incomes.userId, user.id)),
       db.insert(incomes).values([
-        { userId: user.id, name: mainName, kind, amountMinor: main, variable: false },
+        { userId: user.id, name: mainName, kind, amountMinor: main, variable: false, payslip },
         ...extras.map((x) => ({ userId: user.id, name: x.name, kind: "other", amountMinor: x.amount!, variable: true })),
       ]),
       db.update(users).set({ paydayRule: payday, paydayDay, updatedAt: new Date() }).where(eq(users.id, user.id)),

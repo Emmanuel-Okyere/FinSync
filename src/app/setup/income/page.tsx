@@ -23,6 +23,7 @@ export default async function SetupIncome() {
           kind: main?.kind ?? "salary",
           payday: user.paydayRule,
           paydayDay: user.paydayDay,
+          payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), allowances: main.payslip.allowances ? toInputValue(main.payslip.allowances) : "", tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "" } : null,
           extras: rows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor).replace(/\.00$/, "") })),
         }}
       />

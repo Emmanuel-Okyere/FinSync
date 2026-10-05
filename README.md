@@ -48,3 +48,17 @@ A `postgresql://…@localhost/…` URL uses a plain Postgres driver for local wo
 | Imports/exports | CSV only, 4 MB cap, parsed in memory and not stored as files; exported cells starting with `= + - @` are neutralised. |
 | Google sign-in | PKCE + state + nonce, ID token verified against Google's JWKS, verified email required, never auto-links to an existing account by email. |
 | Errors | Server actions return friendly messages; internal errors and SQL never reach the browser. |
+
+## Tax and SSNIT calculator
+
+`src/lib/paye.ts` holds the rules as data: GRA monthly PAYE bands (Act 1178 from 1 Sep 2026; Act 1111 before that), SSNIT 5.5% of basic capped at the 2026 maximum insurable earnings (GH₵ 69,000), Tier 3 relief up to 16.5% of basic, bonus at 5% up to 15% of annual basic, and junior-staff overtime rates. The table is picked by pay date, so add a new entry to `TAX_TABLES` when GRA changes rates, then run:
+
+```bash
+npm run test:paye
+```
+
+The server always recomputes take-home from the gross inputs; it never trusts a figure sent by the browser.
+
+## Legal pages
+
+`/terms` and `/privacy` read the operator name and contact email from `LEGAL_OPERATOR_NAME` and `SUPPORT_EMAIL`. Have them reviewed by a lawyer before launch, and register with Ghana's Data Protection Commission as a data controller.

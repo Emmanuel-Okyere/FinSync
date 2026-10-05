@@ -23,6 +23,8 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull(
 export type Bucket = { key: string; name: string; pct: number };
 export type Scheme = { id: string; name: string; buckets: Bucket[] };
 
+export type PayslipInput = { basic: number; allowances: number; tier3Pct: number };
+
 export type UserSettings = {
   overBudgetAlerts: boolean;
   billReminders: boolean;
@@ -126,6 +128,8 @@ export const incomes = pgTable(
     kind: text("kind").notNull().default("salary"),
     amountMinor: money("amount_minor").notNull(),
     variable: boolean("variable").notNull().default(false),
+    // When take-home was worked out from gross pay (inputs only; net is recomputed server-side).
+    payslip: jsonb("payslip").$type<PayslipInput>(),
     createdAt: createdAt(),
   },
   (t) => [index("incomes_user_idx").on(t.userId), check("incomes_amount_pos", sql`${t.amountMinor} >= 0`)],
