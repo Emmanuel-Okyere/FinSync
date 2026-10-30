@@ -22,6 +22,7 @@ export function IncomeForm({
   initial,
   submitLabel = "Continue",
   returnTo,
+  compact = false,
 }: {
   action: (p: FormState, fd: FormData) => Promise<FormState>;
   initial: {
@@ -36,6 +37,8 @@ export function IncomeForm({
   };
   submitLabel?: string;
   returnTo?: string;
+  /** Single column, for dialogs (no side summary column). */
+  compact?: boolean;
 }) {
   const [netInput, setNetInput] = useState(initial.main);
   const [kind, setKind] = useState(initial.kind);
@@ -80,7 +83,7 @@ export function IncomeForm({
   const total = parse(main) + extras.reduce((s, e) => s + parse(e.amount), 0);
 
   return (
-    <ActionForm action={action} className="sk-setup">
+    <ActionForm action={action} className={compact ? "sk-setup sk-setup--stack" : "sk-setup"}>
       {returnTo ? <input type="hidden" name="returnTo" value={returnTo} /> : null}
       <div className="sk-stack" style={{ gap: 16 }}>
         <div className="sk-card sk-card--pad sk-stack">
@@ -207,7 +210,7 @@ export function IncomeForm({
           {fixedDate ? (
             <div className="sk-stack" style={{ marginTop: 14, gap: 8 }}>
               <span className="sk-label" id="weekend-label">If it falls on a weekend, you&apos;re paid</span>
-              <div className="sk-seg" role="radiogroup" aria-labelledby="weekend-label" style={{ maxWidth: 420 }}>
+              <div className="sk-seg sk-seg--fit" role="radiogroup" aria-labelledby="weekend-label" style={{ maxWidth: 420 }}>
                 {(["before", "after", "same"] as WeekendShift[]).map((w) => (
                   <label key={w}>
                     <input type="radio" name="paydayWeekend" value={w} checked={weekend === w} onChange={() => setWeekend(w)} />
@@ -268,7 +271,7 @@ export function IncomeForm({
         </div>
       </div>
 
-      <aside className="sk-stack" style={{ gap: 16, position: "sticky", top: 16 }}>
+      <aside className="sk-stack sk-setup__aside" style={{ gap: 16 }}>
         <div className="sk-card sk-card--pad sk-stack" style={{ gap: 6 }}>
           <div className="sk-over">Each month</div>
           <div className="sk-num" style={{ fontSize: 34, lineHeight: "40px" }}>

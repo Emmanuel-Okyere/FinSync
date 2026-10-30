@@ -331,3 +331,12 @@ dialog.sk-confirm { max-width: 420px; }
 @media (max-width: 900px) { dialog.sk-confirm { margin: auto 0 0; max-width: 100%; } }
 .sk-btn--destructive { background: var(--expense); color: var(--canvas); }
 .sk-btn--destructive:hover { background: var(--expense); color: var(--canvas); filter: brightness(.92); }
+
+/* Setup forms: side summary sticks on wide pages; stacks in dialogs and on phones */
+.sk-setup__aside { position: sticky; top: 16px; }
+.sk-setup--stack { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.sk-setup--stack .sk-setup__aside { position: static; }
+@media (max-width: 900px) { .sk-setup__aside { position: static; } }
+/* Segmented controls that must fit narrow spaces: let options shrink instead of overflowing */
+.sk-seg--fit > * { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) { .sk-seg--fit > * { font-size: 13px; padding: 0 4px; } }

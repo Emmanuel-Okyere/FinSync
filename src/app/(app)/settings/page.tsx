@@ -97,6 +97,7 @@ export default async function Settings() {
               <IncomeForm
                 action={saveIncome}
                 returnTo="settings"
+                compact
                 submitLabel="Save"
                 initial={{
                   main: main ? toInputValue(main.amountMinor) : "",
