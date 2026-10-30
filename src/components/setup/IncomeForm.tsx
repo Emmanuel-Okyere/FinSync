@@ -5,7 +5,7 @@ import { ActionForm, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import type { FormState } from "@/lib/action";
 import { yearOfPay } from "@/lib/paye";
-import { fmtShort, fmtWeekday, nextPaydayDetail, weekendLabel, type WeekendShift } from "@/lib/dates";
+import { cycleBounds, fmtCycle, fmtShort, fmtWeekday, nextPaydayDetail, weekendLabel, type WeekendShift } from "@/lib/dates";
 import { AllowanceList, rowsToItems, type AllowanceRow } from "@/components/AllowanceList";
 import { BenefitsField, DeductionList, rowsToDeductions, type DeductionRow } from "@/components/DeductionList";
 
@@ -30,6 +30,7 @@ export function IncomeForm({
     payday: string;
     paydayDay: number | null;
     paydayWeekend?: string;
+    budgetCycle?: string;
     extras: Extra[];
     payslip?: { basic: string; tier3Pct: string; items: AllowanceRow[]; deductions: DeductionRow[]; taxableBenefits: string } | null;
   };
@@ -62,9 +63,15 @@ export function IncomeForm({
   const [payday, setPayday] = useState(initial.payday);
   const [paydayDay, setPaydayDay] = useState(String(initial.paydayDay ?? 28));
   const [weekend, setWeekend] = useState<WeekendShift>((initial.paydayWeekend as WeekendShift) ?? "before");
-  const fixedDate = payday === "25th" || payday === "date";
+  const fixedDate = ["25th", "date", "last_day", "day_before_last"].includes(payday);
+  const [cycle, setCycle] = useState(initial.budgetCycle ?? "payday");
   const dayNum = Number(paydayDay);
   const today = new Date().toISOString().slice(0, 10);
+  const cyclePreview = (() => {
+    if (payday === "date" && !(Number.isInteger(dayNum) && dayNum >= 1 && dayNum <= 31)) return null;
+    const b = cycleBounds({ mode: "payday", rule: payday, day: payday === "date" ? dayNum : null, weekend }, today);
+    return fmtCycle(b.start, b.end);
+  })();
   const preview =
     payday !== "date" || (Number.isInteger(dayNum) && dayNum >= 1 && dayNum <= 31)
       ? nextPaydayDetail(payday, payday === "date" ? dayNum : null, today, weekend)
@@ -178,10 +185,12 @@ export function IncomeForm({
           <legend className="sk-label" style={{ float: "left", width: "100%", marginBottom: 10 }}>When is payday?</legend>
           <div className="sk-chips sk-wrap">
             {[
+              ["date", "Set date"],
               ["25th", "25th"],
               ["last_working_day", "Last working day"],
+              ["last_day", "Last day of month"],
+              ["day_before_last", "Day before month ends"],
               ["weekly", "Weekly"],
-              ["date", "Pick a date"],
             ].map(([v, l]) => (
               <label key={v} className="sk-chip">
                 <input type="radio" name="payday" value={v} checked={payday === v} onChange={() => setPayday(v)} />
@@ -216,6 +225,20 @@ export function IncomeForm({
               {preview.movedFrom ? ` (moved from ${fmtShort(preview.movedFrom)}, a ${weekdayName(preview.movedFrom)})` : ""}
             </p>
           ) : null}
+          {payday !== "weekly" ? (
+            <label className="sk-between" style={{ marginTop: 14, gap: 12, cursor: "pointer", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              <span>
+                <span style={{ fontWeight: 600, display: "block" }}>Start my budget on payday</span>
+                <span className="sk-cap" style={{ display: "block" }}>
+                  {cycle === "payday" && cyclePreview
+                    ? `Each budget runs from payday to the day before the next one. This one: ${cyclePreview}.`
+                    : "Off: your budget runs from the 1st to the end of each month."}
+                </span>
+              </span>
+              <input type="checkbox" className="sk-toggle" checked={cycle === "payday"} onChange={(e) => setCycle(e.target.checked ? "payday" : "calendar")} aria-label="Start my budget on payday" />
+            </label>
+          ) : null}
+          <input type="hidden" name="budgetCycle" value={payday === "weekly" ? "calendar" : cycle} />
         </fieldset>
 
         <div className="sk-card sk-card--pad">

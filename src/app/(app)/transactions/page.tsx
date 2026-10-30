@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { fmtMonthYear, monthEnd, parseMonthParam, relDay } from "@/lib/dates";
+import { parseDateParam, relDay } from "@/lib/dates";
+import { ensurePeriod } from "@/lib/budget";
 import { cedis, parseMoney } from "@/lib/money";
 import { listTransactions } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
-import { MonthSwitch, PageHead } from "@/components/app/PageHead";
+import { PeriodSwitch, PageHead } from "@/components/app/PageHead";
+import { fmtCycle } from "@/lib/dates";
 import { Empty, Tx, type TxLike } from "@/components/app/ui";
 
 export const metadata = { title: "Transactions · FinSync" };
@@ -22,18 +24,20 @@ const FILTERS = [
   ["cash", "Cash"],
 ] as const;
 
-export default async function Transactions({ searchParams }: { searchParams: Promise<{ m?: string; q?: string; f?: string; min?: string; all?: string }> }) {
+export default async function Transactions({ searchParams }: { searchParams: Promise<{ p?: string; m?: string; q?: string; f?: string; min?: string; all?: string }> }) {
   const sp = await searchParams;
   const user = await requireOnboardedUser();
-  const month = parseMonthParam(sp.m);
+  const period = await ensurePeriod(user, parseDateParam(sp.p, sp.m));
+  const { start, end } = period;
+  const label = fmtCycle(start, end);
   const q = (sp.q ?? "").trim().slice(0, 80);
   const f = FILTERS.some(([k]) => k === sp.f) ? sp.f! : "all";
   const min = sp.min ? parseMoney(sp.min) ?? undefined : undefined;
   const allTime = sp.all === "1";
 
   const rows = await listTransactions(user.id, {
-    from: allTime ? undefined : month,
-    to: allTime ? undefined : monthEnd(month),
+    from: allTime ? undefined : start,
+    to: allTime ? undefined : end,
     q: q || undefined,
     kind: f === "income" || f === "expense" ? f : undefined,
     bucket: f === "needs" || f === "wants" || f === "savings" ? f : undefined,
@@ -47,22 +51,22 @@ export default async function Transactions({ searchParams }: { searchParams: Pro
   const spent = rows.filter((r) => r.kind === "expense").reduce((s, r) => s + r.amountMinor, 0);
   const qs = (o: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    const merged = { m: month.slice(0, 7), q: q || undefined, f: f !== "all" ? f : undefined, all: allTime ? "1" : undefined, ...o };
+    const merged = { p: start, q: q || undefined, f: f !== "all" ? f : undefined, all: allTime ? "1" : undefined, ...o };
     for (const [k, val] of Object.entries(merged)) if (val) p.set(k, val);
     return `/transactions?${p}`;
   };
 
   return (
     <>
-      <PageHead title="Transactions" back="/home" search={false} sub={allTime ? "All time" : fmtMonthYear(month)}>
-        {!allTime ? <MonthSwitch month={month} base="/transactions" extra={`${q ? `&q=${encodeURIComponent(q)}` : ""}${f !== "all" ? `&f=${f}` : ""}`} /> : null}
-        <a className="sk-btn sk-btn--sm sk-btn--ghost hide-mobile" href={`/api/export?from=${allTime ? "2000-01-01" : month}&to=${allTime ? "2100-12-31" : monthEnd(month)}`}>
+      <PageHead title="Transactions" back="/home" search={false} sub={allTime ? "All time" : label}>
+        {!allTime ? <PeriodSwitch start={start} end={end} label={label} base="/transactions" extra={`${q ? `&q=${encodeURIComponent(q)}` : ""}${f !== "all" ? `&f=${f}` : ""}`} /> : null}
+        <a className="sk-btn sk-btn--sm sk-btn--ghost hide-mobile" href={`/api/export?from=${allTime ? "2000-01-01" : start}&to=${allTime ? "2100-12-31" : end}`}>
           <Icon name="download" />Export CSV
         </a>
       </PageHead>
 
       <form role="search" className="sk-row" style={{ gap: 10 }}>
-        <input type="hidden" name="m" value={month.slice(0, 7)} />
+        <input type="hidden" name="p" value={start} />
         {f !== "all" ? <input type="hidden" name="f" value={f} /> : null}
         <div className="sk-input grow">
           <Icon name="search" />
@@ -87,7 +91,7 @@ export default async function Transactions({ searchParams }: { searchParams: Pro
         <div className="sk-card sk-card--pad">
           <div className="sk-between">
             <div>
-              <div className="sk-over">{rows.length} result{rows.length === 1 ? "" : "s"} {allTime ? "all time" : "this month"}</div>
+              <div className="sk-over">{rows.length} result{rows.length === 1 ? "" : "s"} {allTime ? "all time" : "this cycle"}</div>
               <div className="sk-num" style={{ fontSize: 24 }}>GH₵ {cedis(spent, 2)}</div>
             </div>
             {rows.length ? <div className="sk-cap right">Avg GH₵ {cedis(Math.round(spent / Math.max(1, rows.filter((r) => r.kind === "expense").length)))}<br />each</div> : null}
@@ -113,7 +117,7 @@ export default async function Transactions({ searchParams }: { searchParams: Pro
             );
           })
         ) : (
-          <Empty icon={<Icon name="search" />} title={q ? `No entries match “${q}”` : "No entries this month"}>
+          <Empty icon={<Icon name="search" />} title={q ? `No entries match “${q}”` : "No entries in this cycle"}>
             {q ? "Try another word, or search all time." : "Use the gold + to log one."}
           </Empty>
         )}

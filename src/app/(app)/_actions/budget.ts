@@ -3,27 +3,29 @@
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { budgetLines, budgetMonths, categories, fixedExpenses, transactions, users } from "@/db/schema";
+import { budgetLines, budgetPeriods, categories, fixedExpenses, transactions, users } from "@/db/schema";
 import { FormState, UserError, formObject, run, zMoney, zText, zUuid } from "@/lib/action";
 import { actionUser, type SessionUser } from "@/lib/auth/session";
-import { incomeTotal } from "@/lib/budget";
-import { addMonths, monthEnd, monthStart, todayISO } from "@/lib/dates";
+import { ensurePeriod, incomeTotal } from "@/lib/budget";
+import { addDays, todayISO } from "@/lib/dates";
 import { parseSchemeForm } from "@/lib/scheme-form";
 import { ICON_CHOICES } from "@/lib/categories";
 
 /** Loads a line and proves it belongs to the user. */
 async function ownLine(user: SessionUser, lineId: string) {
   const [row] = await db
-    .select({ line: budgetLines, month: budgetMonths.month, catName: categories.name })
+    .select({ line: budgetLines, period: { start: budgetPeriods.start, end: budgetPeriods.end }, catName: categories.name })
     .from(budgetLines)
-    .innerJoin(budgetMonths, eq(budgetMonths.id, budgetLines.monthId))
+    .innerJoin(budgetPeriods, eq(budgetPeriods.id, budgetLines.monthId))
     .innerJoin(categories, eq(categories.id, budgetLines.categoryId))
     .where(and(eq(budgetLines.id, lineId), eq(budgetLines.userId, user.id)));
   if (!row) throw new UserError("That budget line no longer exists.");
   return row;
 }
 
-async function lineActual(userId: string, categoryId: string, month: string) {
+type Range = { start: string; end: string };
+
+async function lineActual(userId: string, categoryId: string, period: Range) {
   const [r] = await db
     .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}), 0)` })
     .from(transactions)
@@ -32,26 +34,26 @@ async function lineActual(userId: string, categoryId: string, month: string) {
         eq(transactions.userId, userId),
         eq(transactions.kind, "expense"),
         eq(transactions.categoryId, categoryId),
-        gte(transactions.occurredOn, month),
-        lte(transactions.occurredOn, monthEnd(month)),
+        gte(transactions.occurredOn, period.start),
+        lte(transactions.occurredOn, period.end),
       ),
     );
   return Number(r.total);
 }
 
-/** The date to use for system entries in a month: today if it's the current month, else the 1st. */
-function entryDate(month: string) {
+/** The date to use for system entries in a cycle: today if it's the current cycle, else its first day. */
+function entryDate(period: Range) {
   const t = todayISO();
-  return monthStart(t) === month ? t : month;
+  return t >= period.start && t <= period.end ? t : period.start;
 }
 
 /** Strike a line off (fills Actual with the plan) or un-strike it (removes that fill). */
 export async function toggleLine(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
-    const { line, month, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
+    const { line, period, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
     if (!line.done) {
-      const actual = await lineActual(user.id, line.categoryId, month);
+      const actual = await lineActual(user.id, line.categoryId, period);
       const gap = line.plannedMinor - actual;
       if (gap > 0) {
         await db.insert(transactions).values({
@@ -61,7 +63,7 @@ export async function toggleLine(_: FormState, fd: FormData): Promise<FormState>
           categoryId: line.categoryId,
           name: catName,
           method: "other",
-          occurredOn: entryDate(month),
+          occurredOn: entryDate(period),
           source: "strike",
           note: "Struck off in budget",
         });
@@ -77,8 +79,8 @@ export async function toggleLine(_: FormState, fd: FormData): Promise<FormState>
             eq(transactions.userId, user.id),
             eq(transactions.categoryId, line.categoryId),
             inArray(transactions.source, ["strike", "adjust"]),
-            gte(transactions.occurredOn, month),
-            lte(transactions.occurredOn, monthEnd(month)),
+            gte(transactions.occurredOn, period.start),
+            lte(transactions.occurredOn, period.end),
           ),
         ),
       db.update(budgetLines).set({ done: false }).where(eq(budgetLines.id, line.id)),
@@ -91,9 +93,9 @@ export async function toggleLine(_: FormState, fd: FormData): Promise<FormState>
 export async function setLineActual(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
-    const { line, month, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
+    const { line, period, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
     const target = zMoney("Actual").parse(fd.get("actual") ?? "");
-    const actual = await lineActual(user.id, line.categoryId, month);
+    const actual = await lineActual(user.id, line.categoryId, period);
     const delta = target - actual;
     if (delta === 0) return "No change";
 
@@ -105,8 +107,8 @@ export async function setLineActual(_: FormState, fd: FormData): Promise<FormSta
           eq(transactions.userId, user.id),
           eq(transactions.categoryId, line.categoryId),
           inArray(transactions.source, ["strike", "adjust"]),
-          gte(transactions.occurredOn, month),
-          lte(transactions.occurredOn, monthEnd(month)),
+          gte(transactions.occurredOn, period.start),
+          lte(transactions.occurredOn, period.end),
         ),
       )
       .limit(1);
@@ -124,7 +126,7 @@ export async function setLineActual(_: FormState, fd: FormData): Promise<FormSta
         categoryId: line.categoryId,
         name: catName,
         method: "other",
-        occurredOn: entryDate(month),
+        occurredOn: entryDate(period),
         source: "adjust",
         note: "Adjusted in budget",
       });
@@ -151,25 +153,25 @@ export async function removeLine(_: FormState, fd: FormData): Promise<FormState>
     const user = await actionUser();
     const { line, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
     await db.delete(budgetLines).where(eq(budgetLines.id, line.id));
-    return `${catName} removed from this month`;
+    return `${catName} removed from this cycle`;
   });
 }
 
-/** Add a line to a month, creating the category if it's new. */
+/** Add a line to a cycle, creating the category if it's new. */
 export async function addLine(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
     const d = z
       .object({
-        month: z.string().regex(/^\d{4}-\d{2}-01$/),
+        periodId: zUuid,
         name: zText(40, "Name"),
         bucket: z.enum(["needs", "wants", "savings", "giving"]),
         icon: z.enum(ICON_CHOICES as [string, ...string[]]).default("tag"),
         planned: zMoney("Planned"),
       })
       .parse(formObject(fd));
-    const [m] = await db.select().from(budgetMonths).where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, d.month)));
-    if (!m) throw new UserError("Open that month first.");
+    const [m] = await db.select().from(budgetPeriods).where(and(eq(budgetPeriods.userId, user.id), eq(budgetPeriods.id, d.periodId)));
+    if (!m) throw new UserError("That budget cycle no longer exists.");
     const [existing] = await db.select().from(categories).where(and(eq(categories.userId, user.id), sql`lower(${categories.name}) = lower(${d.name})`));
     const cat =
       existing ??
@@ -181,19 +183,19 @@ export async function addLine(_: FormState, fd: FormData): Promise<FormState> {
       .values({ monthId: m.id, userId: user.id, categoryId: cat.id, plannedMinor: d.planned })
       .onConflictDoNothing()
       .returning({ id: budgetLines.id });
-    if (!res.length) throw new UserError(`${cat.name} is already in this month.`, "name");
+    if (!res.length) throw new UserError(`${cat.name} is already in this cycle.`, "name");
     return `${cat.name} added`;
   });
 }
 
-/** Move planned money between two lines of the same month (cut suggestions). */
+/** Move planned money between two lines of the same cycle (cut suggestions). */
 export async function moveBetweenLines(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
     const from = await ownLine(user, zUuid.parse(fd.get("from")));
     const to = await ownLine(user, zUuid.parse(fd.get("to")));
     const amount = zMoney().parse(fd.get("amount") ?? "");
-    if (from.line.monthId !== to.line.monthId) throw new UserError("Lines must be in the same month.");
+    if (from.line.monthId !== to.line.monthId) throw new UserError("Lines must be in the same cycle.");
     if (amount <= 0 || amount > from.line.plannedMinor) throw new UserError(`${from.catName} doesn't have that much planned.`);
     // Conditional update keeps the move safe under double-clicks.
     const moved = await db
@@ -207,27 +209,26 @@ export async function moveBetweenLines(_: FormState, fd: FormData): Promise<Form
   });
 }
 
-/** Change scheme: saves as default and applies to this month and/or next. */
+/** Change scheme: saves as default and applies to this cycle and/or the next. */
 export async function applyScheme(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
     const scheme = parseSchemeForm(fd);
     const target = String(fd.get("apply") ?? "this");
-    const month = z.string().regex(/^\d{4}-\d{2}-01$/).parse(fd.get("month"));
+    const periodId = zUuid.parse(fd.get("periodId"));
+    const [p] = await db.select().from(budgetPeriods).where(and(eq(budgetPeriods.userId, user.id), eq(budgetPeriods.id, periodId)));
+    if (!p) throw new UserError("That budget cycle no longer exists.");
     await db.update(users).set({ scheme, updatedAt: new Date() }).where(eq(users.id, user.id));
     if (target === "this") {
-      await db
-        .update(budgetMonths)
-        .set({ scheme, incomeMinor: await incomeTotal(user.id) })
-        .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, month)));
-      return `Applied ${scheme.name} to this month`;
+      await db.update(budgetPeriods).set({ scheme, incomeMinor: p.paidOn ? p.incomeMinor : await incomeTotal(user.id) }).where(eq(budgetPeriods.id, p.id));
+      return `Applied ${scheme.name} to this cycle`;
     }
-    // Next month picks up the saved default when it's first opened; refresh it if it already exists.
+    // The next cycle picks up the saved default when it's first opened; refresh it if it already exists.
     await db
-      .update(budgetMonths)
+      .update(budgetPeriods)
       .set({ scheme })
-      .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, addMonths(month, 1))));
-    return `${scheme.name} will be used from next month`;
+      .where(and(eq(budgetPeriods.userId, user.id), eq(budgetPeriods.start, addDays(p.end, 1))));
+    return `${scheme.name} will be used from next cycle`;
   });
 }
 
@@ -268,11 +269,8 @@ export async function saveFixedExpense(_: FormState, fd: FormData): Promise<Form
         .insert(fixedExpenses)
         .values({ userId: user.id, categoryId, name: d.name, amountMinor: d.amount, dayOfMonth: d.day })
         .returning();
-      // Add it to this month's plan right away.
-      const [m] = await db
-        .select()
-        .from(budgetMonths)
-        .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, monthStart(todayISO()))));
+      // Add it to this cycle's plan right away.
+      const [m] = [await ensurePeriod(user, todayISO())];
       if (m) {
         await db
           .insert(budgetLines)

@@ -16,8 +16,8 @@ import {
 } from "@/db/schema";
 import { FormState, UserError, formObject, run, zBool, zDate, zDateOpt, zMoney, zMoneyOpt, zText, zTextOpt, zUuid } from "@/lib/action";
 import { actionUser, type SessionUser } from "@/lib/auth/session";
-import { ensureCategories, ensureMonth } from "@/lib/budget";
-import { monthStart, todayISO } from "@/lib/dates";
+import { ensureCategories, ensurePeriod } from "@/lib/budget";
+import { fmtCycle, todayISO } from "@/lib/dates";
 
 async function categoryByName(user: SessionUser, name: string, bucket: string, icon: string, kind: "expense" | "income" = "expense") {
   await db.insert(categories).values({ userId: user.id, name, bucket, icon, kind }).onConflictDoNothing();
@@ -276,13 +276,12 @@ export async function addPremiumToBudget(_: FormState, fd: FormData): Promise<Fo
     const user = await actionUser();
     const [p] = await db.select().from(insurancePolicies).where(and(eq(insurancePolicies.id, zUuid.parse(fd.get("id"))), eq(insurancePolicies.userId, user.id)));
     if (!p) throw new UserError("That policy no longer exists.");
-    const month = monthStart(p.renewsOn && p.renewsOn >= todayISO() ? p.renewsOn : todayISO());
-    const m = await ensureMonth(user, month);
+    const m = await ensurePeriod(user, p.renewsOn && p.renewsOn >= todayISO() ? p.renewsOn : todayISO());
     const cat = await categoryByName(user, "Insurance", "needs", "shield");
     await db
       .insert(budgetLines)
       .values({ monthId: m.id, userId: user.id, categoryId: cat.id, plannedMinor: p.premiumMinor })
       .onConflictDoUpdate({ target: [budgetLines.monthId, budgetLines.categoryId], set: { plannedMinor: sql`${budgetLines.plannedMinor} + ${p.premiumMinor}` } });
-    return `Added GH₵ ${Math.round(p.premiumMinor / 100)} to that month's Insurance line`;
+    return `Added GH₵ ${Math.round(p.premiumMinor / 100)} to the ${fmtCycle(m.start, m.end)} Insurance line`;
   });
 }

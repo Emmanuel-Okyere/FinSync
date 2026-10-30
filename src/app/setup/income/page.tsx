@@ -25,6 +25,7 @@ export default async function SetupIncome() {
           payday: user.paydayRule,
           paydayDay: user.paydayDay,
           paydayWeekend: user.paydayWeekend,
+          budgetCycle: user.onboardedAt ? user.budgetCycle : "payday",
           payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })), deductions: payslipDeductionRows(main.payslip), taxableBenefits: main.payslip.taxableBenefits ? toInputValue(main.payslip.taxableBenefits) : "" } : null,
           extras: rows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor).replace(/\.00$/, "") })),
         }}

@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { savingsAccounts } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { monthView } from "@/lib/budget";
-import { fmtShort, monthStart, todayISO, relDay } from "@/lib/dates";
+import { periodView } from "@/lib/budget";
+import { fmtShort, todayISO, relDay } from "@/lib/dates";
 import { cedis, toInputValue } from "@/lib/money";
 import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
@@ -46,7 +46,7 @@ export default async function Savings() {
   const today = todayISO();
   const [accounts, v] = await Promise.all([
     db.select().from(savingsAccounts).where(eq(savingsAccounts.userId, user.id)).orderBy(savingsAccounts.createdAt),
-    monthView(user, monthStart(today)),
+    periodView(user, today),
   ]);
   const total = accounts.reduce((s, a) => s + a.balanceMinor, 0);
 
@@ -63,7 +63,7 @@ export default async function Savings() {
           <div className="sk-card sk-card--pad sk-stack" style={{ gap: 6 }}>
             <div className="sk-over">Saved across {accounts.length} place{accounts.length === 1 ? "" : "s"}</div>
             <Amount minor={total} style={{ fontSize: 40, lineHeight: "44px" }} />
-            <div className="sk-cap">This month: GH₵ {cedis(v.saved)} of {cedis(v.savingsTarget)} set aside</div>
+            <div className="sk-cap">This cycle ({v.period.label}): GH₵ {cedis(v.saved)} of {cedis(v.savingsTarget)} set aside</div>
             <Bar value={v.saved} max={v.savingsTarget} tone="savings" />
           </div>
           <div className="sk-card sk-card--pad">
@@ -90,7 +90,7 @@ export default async function Savings() {
                         <Field name="amount" label="Amount (GH₵)" inputMode="decimal" required />
                         <label className="sk-between" style={{ cursor: "pointer" }}>
                           <span>
-                            <b>Count as saving this month</b>
+                            <b>Count as saving this cycle</b>
                             <div className="sk-cap">Logs it in your Savings bucket</div>
                           </span>
                           <input type="checkbox" className="sk-toggle" name="log" defaultChecked />

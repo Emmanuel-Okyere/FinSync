@@ -3,8 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { fixedExpenses, users } from "@/db/schema";
-import { getMonthView } from "@/lib/budget";
-import { addDays, dayOf, monthStart, todayISO } from "@/lib/dates";
+import { getPeriodView } from "@/lib/budget";
+import { addDays, dayOf, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { sendSms } from "@/lib/sms/giant";
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
         if (due.length) parts.push(`Due tomorrow: ${due.map((d) => `${d.name} GH₵${cedis(d.amount)}`).join(", ")}.`);
       }
       if (u.settings.dailySafeToSpend || u.settings.overBudgetAlerts) {
-        const v = await getMonthView(u, monthStart(today));
+        const v = await getPeriodView(u, today);
         if (u.settings.dailySafeToSpend) parts.push(`Safe to spend today: GH₵${cedis(v.safeToday, 2)}.`);
         if (u.settings.overBudgetAlerts) {
           const over = v.lines.filter((l) => l.actual > l.planned && l.bucket !== "savings");

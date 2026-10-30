@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { budgetLines, budgetMonths, categories, transactions } from "@/db/schema";
+import { budgetLines, budgetPeriods, categories, transactions } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { monthView } from "@/lib/budget";
-import { addMonths, fmtMonthYear, monthStart, parseMonthParam, todayISO } from "@/lib/dates";
+import { ensurePeriod, periodView } from "@/lib/budget";
+import { addDays, fmtMonthYear, parseDateParam, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { listTransactions } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
@@ -16,7 +16,7 @@ export const metadata = { title: "Reports · FinSync" };
 
 const tile = (b: string) => (b === "wants" ? "wants" : b === "savings" ? "savings" : "needs");
 
-export default async function Reports({ searchParams }: { searchParams: Promise<{ view?: string; m?: string; y?: string }> }) {
+export default async function Reports({ searchParams }: { searchParams: Promise<{ view?: string; p?: string; m?: string; y?: string }> }) {
   const sp = await searchParams;
   const user = await requireOnboardedUser();
   const view = sp.view === "year" ? "year" : "month";
@@ -24,14 +24,16 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
 
   const Seg = (
     <nav className="sk-seg" style={{ width: 220 }} aria-label="Report period">
-      <Link href="/reports" className={view === "month" ? "is-on" : ""}>Month</Link>
+      <Link href="/reports" className={view === "month" ? "is-on" : ""}>{user.budgetCycle === "payday" ? "Cycle" : "Month"}</Link>
       <Link href="/reports?view=year" className={view === "year" ? "is-on" : ""}>Year</Link>
     </nav>
   );
 
   if (view === "month") {
-    const month = sp.m ? parseMonthParam(sp.m) : addMonths(monthStart(today), -1);
-    const v = await monthView(user, month);
+    // Default to the last finished cycle.
+    const date = sp.p || sp.m ? parseDateParam(sp.p, sp.m) : addDays((await ensurePeriod(user, today)).start, -1);
+    const v = await periodView(user, date);
+    const { start, end, label } = v.period;
     const inn = v.income + v.extraIncome;
     const out = v.totalActual - v.saved;
     const savePct = inn ? (v.saved / inn) * 100 : 0;
@@ -39,13 +41,13 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
     const biggest = [...v.lines].filter((l) => l.bucket !== "savings").sort((a, b) => b.actual - a.actual).slice(0, 6);
     return (
       <>
-        <PageHead title="Reports" sub={fmtMonthYear(month)}>
+        <PageHead title="Reports" sub={label}>
           {Seg}
         </PageHead>
         <div className="sk-between" style={{ maxWidth: 520 }}>
-          <Link className="sk-iconbtn" href={`/reports?m=${addMonths(month, -1).slice(0, 7)}`} aria-label="Previous month"><Icon name="back" /></Link>
-          <b>{fmtMonthYear(month)}</b>
-          <Link className="sk-iconbtn" href={`/reports?m=${addMonths(month, 1).slice(0, 7)}`} aria-label="Next month"><Icon name="next" /></Link>
+          <Link className="sk-iconbtn" href={`/reports?p=${addDays(start, -1)}`} aria-label="Previous cycle"><Icon name="back" /></Link>
+          <b>{label}</b>
+          <Link className="sk-iconbtn" href={`/reports?p=${addDays(end, 1)}`} aria-label="Next cycle"><Icon name="next" /></Link>
         </div>
         <div className="sk-grid g-2">
           <div className="sk-card sk-card--pad sk-stack">
@@ -73,7 +75,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
                 </div>
               ))
             ) : (
-              <Empty title="Nothing spent this month" />
+              <Empty title="Nothing spent in this cycle" />
             )}
           </div>
         </div>
@@ -85,7 +87,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   const from = `${year}-01-01`;
   const to = `${year}-12-31`;
   const [monthsRows, totals, catRows, planRows, debtPaid, recent] = await Promise.all([
-    db.select().from(budgetMonths).where(and(eq(budgetMonths.userId, user.id), gte(budgetMonths.month, from), lte(budgetMonths.month, to))),
+    db.select().from(budgetPeriods).where(and(eq(budgetPeriods.userId, user.id), gte(budgetPeriods.start, from), lte(budgetPeriods.start, to))),
     db
       .select({ m: sql<string>`to_char(${transactions.occurredOn}, 'MM')`, kind: transactions.kind, bucket: categories.bucket, total: sql<string>`sum(${transactions.amountMinor})` })
       .from(transactions)
@@ -101,8 +103,8 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
     db
       .select({ categoryId: budgetLines.categoryId, planned: sql<string>`sum(${budgetLines.plannedMinor})` })
       .from(budgetLines)
-      .innerJoin(budgetMonths, eq(budgetMonths.id, budgetLines.monthId))
-      .where(and(eq(budgetLines.userId, user.id), gte(budgetMonths.month, from), lte(budgetMonths.month, to)))
+      .innerJoin(budgetPeriods, eq(budgetPeriods.id, budgetLines.monthId))
+      .where(and(eq(budgetLines.userId, user.id), gte(budgetPeriods.start, from), lte(budgetPeriods.start, to)))
       .groupBy(budgetLines.categoryId),
     db
       .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}),0)` })
@@ -114,7 +116,8 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
 
   const months = Array.from({ length: 12 }, (_, i) => {
     const mm = String(i + 1).padStart(2, "0");
-    const planned = monthsRows.find((r) => r.month.slice(5, 7) === mm)?.incomeMinor ?? 0;
+    // Pay counts in the month its cycle started (when it arrived).
+    const planned = monthsRows.filter((r) => r.start.slice(5, 7) === mm).reduce((s, r) => s + r.incomeMinor, 0);
     const extra = totals.filter((t) => t.m === mm && t.kind === "income").reduce((s, t) => s + Number(t.total), 0);
     const out = totals.filter((t) => t.m === mm && t.kind === "expense" && t.bucket !== "savings").reduce((s, t) => s + Number(t.total), 0);
     const saved = totals.filter((t) => t.m === mm && t.kind === "expense" && t.bucket === "savings").reduce((s, t) => s + Number(t.total), 0);

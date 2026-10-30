@@ -5,7 +5,7 @@ import { incomes } from "@/db/schema";
 import { signOut } from "@/app/(auth)/actions";
 import { saveIncome } from "@/app/setup/actions";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { paydayLabel, weekendLabel, type WeekendShift } from "@/lib/dates";
+import { paydayLabel } from "@/lib/dates";
 import { otpEnabled } from "@/lib/env";
 import { membershipOf } from "@/lib/household";
 import { displayPhone } from "@/lib/phone";
@@ -92,7 +92,7 @@ export default async function Settings() {
             <Dialog
               title="Income and payday"
               triggerClassName="sk-tx"
-              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}{(user.paydayRule === "25th" || user.paydayRule === "date") && user.paydayWeekend !== "same" ? ` · ${weekendLabel[user.paydayWeekend as WeekendShift]} if on a weekend` : ""}</span><Icon name="next" /></>}
+              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}{user.budgetCycle === "payday" ? " · budget starts on payday" : ""}</span><Icon name="next" /></>}
             >
               <IncomeForm
                 action={saveIncome}
@@ -104,6 +104,7 @@ export default async function Settings() {
                   payday: user.paydayRule,
                   paydayDay: user.paydayDay,
                   paydayWeekend: user.paydayWeekend,
+                  budgetCycle: user.budgetCycle,
                   payslip: main?.payslip ? { basic: toInputValue(main.payslip.basic), tier3Pct: main.payslip.tier3Pct ? String(main.payslip.tier3Pct) : "", items: payslipItems(main.payslip).map((a) => ({ name: a.name ?? "", amount: toInputValue(a.amount), per: a.per })), deductions: payslipDeductionRows(main.payslip), taxableBenefits: main.payslip.taxableBenefits ? toInputValue(main.payslip.taxableBenefits) : "" } : null,
                   extras: incomeRows.filter((r) => r.variable).map((r) => ({ name: r.name, amount: toInputValue(r.amountMinor) })),
                 }}

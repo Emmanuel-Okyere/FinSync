@@ -29,6 +29,13 @@
       "when": 1791205570738,
       "tag": "0003_month_logged_fixed",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793400393646,
+      "tag": "0004_pay_cycles",
+      "breakpoints": true
     }
   ]
 }

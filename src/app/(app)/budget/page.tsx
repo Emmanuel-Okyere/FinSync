@@ -1,25 +1,25 @@
 import Link from "next/link";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { monthView } from "@/lib/budget";
+import { periodView } from "@/lib/budget";
 import { ICON_CHOICES } from "@/lib/categories";
-import { addMonths, fmtMonth, parseMonthParam } from "@/lib/dates";
+import { fmtShort, parseDateParam } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { PRESET_SCHEMES, schemeLabel } from "@/lib/schemes";
 import { ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { BudgetTable } from "@/components/app/BudgetLines";
-import { MonthSwitch, PageHead } from "@/components/app/PageHead";
+import { PeriodSwitch, PageHead } from "@/components/app/PageHead";
 import { SchemePicker } from "@/components/setup/SchemePicker";
 import { Amount, Bar, Empty } from "@/components/app/ui";
 import { addLine, applyScheme } from "../_actions/budget";
 
 export const metadata = { title: "Budget · FinSync" };
 
-export default async function Budget({ searchParams }: { searchParams: Promise<{ m?: string; b?: string }> }) {
+export default async function Budget({ searchParams }: { searchParams: Promise<{ p?: string; m?: string; b?: string }> }) {
   const sp = await searchParams;
   const user = await requireOnboardedUser();
-  const month = parseMonthParam(sp.m);
-  const v = await monthView(user, month);
+  const v = await periodView(user, parseDateParam(sp.p, sp.m));
+  const { start, end, label, id: periodId } = v.period;
   const filter = v.scheme.buckets.some((b) => b.key === sp.b) ? sp.b! : "all";
   const lines = filter === "all" ? v.lines : v.lines.filter((l) => l.bucket === filter);
   const sel = filter === "all" ? { planned: v.totalPlanned, actual: v.totalActual, target: v.income } : (() => {
@@ -27,22 +27,22 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
     return { planned: b.target, actual: b.actual, target: b.target };
   })();
   const bucketNames = Object.fromEntries(v.scheme.buckets.map((b) => [b.key, b.name]));
-  const mParam = `m=${month.slice(0, 7)}`;
+  const pParam = `p=${start}`;
 
   return (
     <>
       <PageHead
-        title={`${fmtMonth(month)} budget`}
-        sub={`${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income)} · ${v.doneCount} of ${v.lines.length} lines struck off`}
+        title={user.budgetCycle === "payday" ? "Budget" : `${label} budget`}
+        sub={`${v.period.paidOn ? `Paid ${fmtShort(v.period.paidOn)} · ` : ""}${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income)} · ${v.doneCount} of ${v.lines.length} lines done`}
       >
-        <MonthSwitch month={month} base="/budget" extra={filter !== "all" ? `&b=${filter}` : ""} />
+        <PeriodSwitch start={start} end={end} label={label} base="/budget" extra={filter !== "all" ? `&b=${filter}` : ""} />
       </PageHead>
 
       <div className="sk-row sk-wrap" style={{ gap: 10 }}>
         <nav className="sk-seg" style={{ maxWidth: 520, flex: "1 1 340px", minWidth: 0 }} aria-label="Bucket">
-          <Link href={`/budget?${mParam}`} className={filter === "all" ? "is-on" : ""}>All</Link>
+          <Link href={`/budget?${pParam}`} className={filter === "all" ? "is-on" : ""}>All</Link>
           {v.scheme.buckets.map((b) => (
-            <Link key={b.key} href={`/budget?${mParam}&b=${b.key}`} className={filter === b.key ? "is-on" : ""}>{b.name}</Link>
+            <Link key={b.key} href={`/budget?${pParam}&b=${b.key}`} className={filter === b.key ? "is-on" : ""}>{b.name}</Link>
           ))}
         </nav>
         <Link className="sk-link" href="/budget/fixed">Fixed expenses →</Link>
@@ -71,7 +71,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
               <b className="sk-h">Lines</b>
               <Dialog label={<><Icon name="plus" />Add line</>} title="Add a budget line" triggerClassName="sk-btn sk-btn--sm sk-btn--quiet">
                 <ActionForm action={addLine} className="sk-stack" reset>
-                  <input type="hidden" name="month" value={month} />
+                  <input type="hidden" name="periodId" value={periodId} />
                   <Field name="name" label="Name" required maxLength={40} placeholder="e.g. School fees" />
                   <div className="sk-grid g-2" style={{ gap: 10 }}>
                     <SelectField name="bucket" label="Bucket" defaultValue={filter !== "all" ? filter : "needs"} options={[{ value: "needs", label: "Needs" }, { value: "wants", label: "Wants" }, { value: "savings", label: "Savings" }, { value: "giving", label: "Giving / debt" }]} />
@@ -114,7 +114,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
 
       <section id="scheme" className="sk-stack" style={{ gap: 12 }}>
         <div>
-          <h2 className="sk-h" style={{ fontSize: 22 }}>Split for {fmtMonth(month)}</h2>
+          <h2 className="sk-h" style={{ fontSize: 22 }}>Split for {label}</h2>
           <p className="sk-cap">Changing the split keeps your lines; bucket targets update.</p>
         </div>
         <SchemePicker
@@ -125,11 +125,11 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
           showSources
           extra={
             <>
-              <input type="hidden" name="month" value={month} />
+              <input type="hidden" name="periodId" value={periodId} />
               <fieldset className="sk-seg" style={{ border: 0, margin: 0 }}>
                 <legend className="sr-only">Apply to</legend>
-                <label><input type="radio" name="apply" value="this" defaultChecked />Apply to {fmtMonth(month)}</label>
-                <label><input type="radio" name="apply" value="next" />Use for {fmtMonth(addMonths(month, 1))}</label>
+                <label><input type="radio" name="apply" value="this" defaultChecked />Apply to this cycle</label>
+                <label><input type="radio" name="apply" value="next" />From next cycle</label>
               </fieldset>
             </>
           }

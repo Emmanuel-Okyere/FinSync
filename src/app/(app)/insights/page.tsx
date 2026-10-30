@@ -1,23 +1,24 @@
 import Link from "next/link";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { cutSuggestions, monthView } from "@/lib/budget";
-import { fmtMonth, fmtShort, monthEnd, parseMonthParam } from "@/lib/dates";
+import { cutSuggestions, periodView } from "@/lib/budget";
+import { fmtShort, parseDateParam } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { dailySpend } from "@/lib/queries";
 import { ActionButton } from "@/components/forms";
 import { Icon } from "@/components/Icon";
-import { MonthSwitch, PageHead } from "@/components/app/PageHead";
+import { PeriodSwitch, PageHead } from "@/components/app/PageHead";
 import { PaceChart } from "@/components/app/charts";
 import { Empty } from "@/components/app/ui";
 import { moveBetweenLines } from "../_actions/budget";
 
 export const metadata = { title: "Insights · FinSync" };
 
-export default async function Insights({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+export default async function Insights({ searchParams }: { searchParams: Promise<{ p?: string; m?: string }> }) {
   const user = await requireOnboardedUser();
-  const month = parseMonthParam((await searchParams).m);
-  const v = await monthView(user, month);
-  const daily = await dailySpend(user.id, month, monthEnd(month));
+  const sp = await searchParams;
+  const v = await periodView(user, parseDateParam(sp.p, sp.m));
+  const { start, end, label } = v.period;
+  const daily = await dailySpend(user.id, start, end);
   const day = v.isCurrent ? v.day : v.days;
   const spentSoFar = daily.slice(0, day).reduce((s, x) => s + x, 0);
   const planSoFar = Math.round((v.spendTarget * day) / v.days);
@@ -28,7 +29,7 @@ export default async function Insights({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHead title="Insights" sub={<Link className="sk-link" href="/reports">Reports →</Link>}>
-        <MonthSwitch month={month} base="/insights" />
+        <PeriodSwitch start={start} end={end} label={label} base="/insights" />
       </PageHead>
       <div className="sk-grid g-2">
         <div className="sk-card sk-card--pad sk-stack">
@@ -39,14 +40,14 @@ export default async function Insights({ searchParams }: { searchParams: Promise
           <div className="sk-cap">Solid line is what you spent. Dashed line is the plan.</div>
           <PaceChart daily={daily} plan={v.spendTarget} days={v.days} today={day} />
           <div className="sk-between sk-cap">
-            <span>{fmtShort(month)}</span>
+            <span>{fmtShort(start)}</span>
             {v.isCurrent ? <span>Today</span> : null}
-            <span>{fmtShort(monthEnd(month))}</span>
+            <span>{fmtShort(end)}</span>
           </div>
         </div>
         <div className="sk-stack">
           <div>
-            <h2 className="sk-h">{cuts.length ? `${cuts.length} way${cuts.length === 1 ? "" : "s"} to finish ${fmtMonth(month)} on plan` : `${fmtMonth(month)} is on plan`}</h2>
+            <h2 className="sk-h">{cuts.length ? `${cuts.length} way${cuts.length === 1 ? "" : "s"} to finish $this cycle on plan` : `$this cycle is on plan`}</h2>
             {cuts.length ? <div className="sk-cap">Do all of them and you get about GH₵ {cedis(back)} back.</div> : null}
           </div>
           {cuts.length ? (

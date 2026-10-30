@@ -4,8 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importBatches } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { cutSuggestions, monthView } from "@/lib/budget";
-import { fmtMonth, monthStart, todayISO } from "@/lib/dates";
+import { cutSuggestions, periodView } from "@/lib/budget";
+import { todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { Icon } from "@/components/Icon";
 
@@ -17,8 +17,7 @@ export default async function ImportDone({ params }: { params: Promise<{ id: str
   const user = await requireOnboardedUser();
   const [batch] = await db.select().from(importBatches).where(and(eq(importBatches.id, id), eq(importBatches.userId, user.id)));
   if (!batch || batch.status !== "done") notFound();
-  const month = monthStart(todayISO());
-  const v = await monthView(user, month);
+  const v = await periodView(user, todayISO());
   const over = v.lines.filter((l) => l.actual > l.planned).sort((a, b) => b.actual - b.planned - (a.actual - a.planned))[0];
   const skipped = batch.rows.length - batch.importedCount;
   const cuts = cutSuggestions(v);
@@ -27,7 +26,7 @@ export default async function ImportDone({ params }: { params: Promise<{ id: str
     <div className="sk-stack" style={{ maxWidth: 520, margin: "24px auto", gap: 16, textAlign: "center", alignItems: "center" }}>
       <span className="sk-tile sk-tile--income" style={{ width: 64, height: 64, borderRadius: 22 }}><Icon name="check" /></span>
       <h1 className="sk-title">{batch.importedCount} entr{batch.importedCount === 1 ? "y" : "ies"} added</h1>
-      <p className="sk-muted">{fmtMonth(month)} is up to date.{skipped ? ` ${skipped} skipped.` : ""}</p>
+      <p className="sk-muted">Your {v.period.label} budget is up to date.{skipped ? ` ${skipped} skipped.` : ""}</p>
       <div className="sk-card sk-card--pad" style={{ width: "100%", textAlign: "left" }}>
         {over ? (
           <div className="sk-tx">

@@ -2,7 +2,8 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, transactions, users } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { fmtMonth, monthEnd, monthStart, relDay, todayISO } from "@/lib/dates";
+import { ensurePeriod } from "@/lib/budget";
+import { fmtCycle, relDay, todayISO } from "@/lib/dates";
 import { balances, membershipOf, pendingInvitesFor } from "@/lib/household";
 import { cedis, toInputValue } from "@/lib/money";
 import { ActionButton, ActionForm, Dialog, Field, Submit } from "@/components/forms";
@@ -45,7 +46,8 @@ export default async function Household() {
     );
   }
 
-  const month = monthStart(todayISO());
+  const cycle = await ensurePeriod(user, todayISO());
+  const month = cycle.start;
   const [{ members, net }, shared] = await Promise.all([
     balances(m.householdId),
     db
@@ -53,7 +55,7 @@ export default async function Household() {
       .from(transactions)
       .innerJoin(users, eq(users.id, transactions.userId))
       .leftJoin(categories, eq(categories.id, transactions.categoryId))
-      .where(and(eq(transactions.householdId, m.householdId), eq(transactions.kind, "expense"), gte(transactions.occurredOn, month), lte(transactions.occurredOn, monthEnd(month))))
+      .where(and(eq(transactions.householdId, m.householdId), eq(transactions.kind, "expense"), gte(transactions.occurredOn, month), lte(transactions.occurredOn, cycle.end)))
       .orderBy(desc(transactions.occurredOn))
       .limit(100),
   ]);
@@ -66,7 +68,7 @@ export default async function Household() {
 
   return (
     <>
-      <PageHead title={m.h.name} back="/settings" sub={`Shared budget · ${fmtMonth(month)}`}>
+      <PageHead title={m.h.name} back="/settings" sub={`Shared budget · ${fmtCycle(cycle.start, cycle.end)}`}>
         {m.role === "owner" ? (
           <Dialog label={<Icon name="settings" />} ariaLabel="Household settings" title="Household settings" triggerClassName="sk-iconbtn">
             <ActionForm action={updateHousehold} className="sk-stack">
@@ -121,7 +123,7 @@ export default async function Household() {
                 </div>
               ))
             ) : (
-              <Empty title="No shared costs this month">When you add an expense, switch on &ldquo;Shared with household&rdquo;.</Empty>
+              <Empty title="No shared costs this cycle">When you add an expense, switch on &ldquo;Shared with household&rdquo;.</Empty>
             )}
           </div>
         </div>

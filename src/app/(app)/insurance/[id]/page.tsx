@@ -3,7 +3,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { insurancePolicies, transactions } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { diffDays, fmtLong, fmtMonth, monthStart, todayISO } from "@/lib/dates";
+import { cycleConfig } from "@/lib/budget";
+import { cycleBounds, diffDays, fmtCycle, fmtLong, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { ActionButton, Dialog } from "@/components/forms";
 import { Icon } from "@/components/Icon";
@@ -18,6 +19,7 @@ export default async function PolicyDetail({ params }: { params: Promise<{ id: s
   const { id } = await params;
   if (!UUID.test(id)) notFound();
   const user = await requireOnboardedUser();
+  const cycleLabel = (d: string) => { const b = cycleBounds(cycleConfig(user), d); return fmtCycle(b.start, b.end); };
   const [p] = await db.select().from(insurancePolicies).where(and(eq(insurancePolicies.id, id), eq(insurancePolicies.userId, user.id)));
   if (!p) notFound();
   const [lastPaid] = await db.select().from(transactions).where(and(eq(transactions.userId, user.id), eq(transactions.insurancePolicyId, p.id))).orderBy(desc(transactions.occurredOn)).limit(1);
@@ -59,7 +61,7 @@ export default async function PolicyDetail({ params }: { params: Promise<{ id: s
       {p.frequency === "yearly" ? (
         <div className="sk-row" style={{ maxWidth: 420 }}>
           <ActionButton action={addPremiumToBudget} fields={{ id: p.id }} className="sk-btn sk-btn--block">
-            Add to {fmtMonth(monthStart(p.renewsOn && p.renewsOn >= today ? p.renewsOn : today))}&apos;s budget
+            Add to the {cycleLabel(p.renewsOn && p.renewsOn >= today ? p.renewsOn : today)} budget
           </ActionButton>
         </div>
       ) : null}

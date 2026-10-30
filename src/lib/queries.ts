@@ -69,23 +69,24 @@ export async function monthlyTotals(userId: string, from: string, to: string) {
   return rows.map((r) => ({ month: r.month, kind: r.kind, total: Number(r.total) }));
 }
 
-/** Spend per day of the month (expense entries, savings categories excluded). */
-export async function dailySpend(userId: string, month: string, end: string) {
+/** Spend per day across [start, end] (expense entries, savings categories excluded); index 0 = start. */
+export async function dailySpend(userId: string, start: string, end: string) {
   const rows = await db
-    .select({ day: sql<number>`extract(day from ${transactions.occurredOn})::int`, total: sql<string>`sum(${transactions.amountMinor})` })
+    .select({ offset: sql<number>`(${transactions.occurredOn} - ${start}::date)::int`, total: sql<string>`sum(${transactions.amountMinor})` })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
     .where(
       and(
         eq(transactions.userId, userId),
         eq(transactions.kind, "expense"),
-        gte(transactions.occurredOn, month),
+        gte(transactions.occurredOn, start),
         lte(transactions.occurredOn, end),
         sql`coalesce(${categories.bucket}, 'needs') <> 'savings'`,
       ),
     )
     .groupBy(sql`1`);
-  const out = new Array(31).fill(0) as number[];
-  for (const r of rows) out[r.day - 1] = Number(r.total);
+  const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+  const out = new Array(Math.max(1, days)).fill(0) as number[];
+  for (const r of rows) if (r.offset >= 0 && r.offset < out.length) out[r.offset] = Number(r.total);
   return out;
 }

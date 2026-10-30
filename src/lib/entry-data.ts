@@ -3,11 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, householdMembers, insurancePolicies } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
-import type { MonthView } from "@/lib/budget";
+import type { PeriodView } from "@/lib/budget";
 import { bucketFor } from "@/lib/schemes";
 
 /** Everything the Add entry sheet needs, shaped for the client. */
-export async function entryData(user: SessionUser, v: MonthView) {
+export async function entryData(user: SessionUser, v: PeriodView) {
   const [cats, policies, member] = await Promise.all([
     db.select().from(categories).where(and(eq(categories.userId, user.id), eq(categories.archived, false))).orderBy(categories.name),
     db.select({ id: insurancePolicies.id, name: insurancePolicies.name }).from(insurancePolicies).where(eq(insurancePolicies.userId, user.id)),

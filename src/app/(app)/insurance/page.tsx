@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { insurancePolicies } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { diffDays, fmtMonth, fmtShort, monthStart, todayISO } from "@/lib/dates";
+import { cycleConfig } from "@/lib/budget";
+import { cycleBounds, diffDays, fmtCycle, fmtShort, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { ActionButton, Dialog } from "@/components/forms";
 import { Icon } from "@/components/Icon";
@@ -17,6 +18,7 @@ export const metadata = { title: "Insurance · FinSync" };
 
 export default async function Insurance() {
   const user = await requireOnboardedUser();
+  const cycleLabel = (d: string) => { const b = cycleBounds(cycleConfig(user), d); return fmtCycle(b.start, b.end); };
   const today = todayISO();
   const policies = await db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, user.id)).orderBy(insurancePolicies.renewsOn);
   const avg = policies.reduce((s, p) => s + (p.frequency === "monthly" ? p.premiumMinor : Math.round(p.premiumMinor / 12)), 0);
@@ -36,16 +38,16 @@ export default async function Insurance() {
             <div className="sk-over">Premiums</div>
             <Amount minor={avg} style={{ fontSize: 34, lineHeight: "40px" }} />
             <div className="sk-cap">a month on average · {policies.length} polic{policies.length === 1 ? "y" : "ies"}</div>
-            <p className="sk-cap">Premiums are expenses in Needs. Monthly ones are added to your budget on the 1st; yearly ones on their due month.</p>
+            <p className="sk-cap">Premiums are expenses in Needs. Monthly ones are added to every budget cycle; yearly ones to the cycle they&apos;re due in.</p>
           </div>
           {upcoming ? (
             <div className="sk-cut">
               <div className="sk-tile sk-tile--wants"><Icon name="bell" /></div>
               <div className="sk-cut__body">
                 <b>{upcoming.name} renews {fmtShort(upcoming.renewsOn!)}</b>
-                <span className="sk-cap">GH₵ {cedis(upcoming.premiumMinor)} due in {diffDays(today, upcoming.renewsOn!)} days. Add it to {fmtMonth(monthStart(upcoming.renewsOn!))}&apos;s budget?</span>
+                <span className="sk-cap">GH₵ {cedis(upcoming.premiumMinor)} due in {diffDays(today, upcoming.renewsOn!)} days. Add it to the {cycleLabel(upcoming.renewsOn!)} budget?</span>
                 <div className="sk-row">
-                  <ActionButton action={addPremiumToBudget} fields={{ id: upcoming.id }}>Add to {fmtMonth(monthStart(upcoming.renewsOn!))}</ActionButton>
+                  <ActionButton action={addPremiumToBudget} fields={{ id: upcoming.id }}>Add to that budget</ActionButton>
                 </div>
               </div>
             </div>

@@ -72,6 +72,8 @@ export const users = pgTable(
     paydayDay: integer("payday_day"),
     // For fixed-date paydays that land on a weekend: before (Friday) | after (Monday) | same.
     paydayWeekend: text("payday_weekend").notNull().default("before"),
+    // Budget cycle: "payday" (payday to payday) or "calendar" (1st to month end).
+    budgetCycle: text("budget_cycle").notNull().default("calendar"),
     currency: text("currency").notNull().default("GHS"),
     scheme: jsonb("scheme").$type<Scheme>(),
     settings: jsonb("settings").$type<UserSettings>().notNull().default(defaultSettings),
@@ -162,19 +164,29 @@ export const categories = pgTable(
   (t) => [uniqueIndex("categories_user_name_uq").on(t.userId, t.name)],
 );
 
-export const budgetMonths = pgTable(
+/**
+ * A budget cycle: payday to the day before the next payday, or a calendar month.
+ * (Table keeps its original name; `month` holds the cycle's first day.)
+ */
+export const budgetPeriods = pgTable(
   "budget_months",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    month: date("month").notNull(), // first day of month, YYYY-MM-01
+    start: date("month").notNull(), // first day of the cycle
+    end: date("end_date").notNull(), // last day of the cycle (inclusive)
+    paidOn: date("paid_on"), // when the user confirmed pay arrived ("I've been paid")
     scheme: jsonb("scheme").$type<Scheme>().notNull(),
     incomeMinor: money("income_minor").notNull(),
-    // Fixed expenses already auto-logged this month. Deleting the entry won't bring it back.
+    // Fixed-expense occurrences already auto-logged ("<fixedId>:<date>"). Deleting the entry won't bring it back.
     loggedFixed: jsonb("logged_fixed").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("budget_months_user_month_uq").on(t.userId, t.month)],
+  (t) => [
+    uniqueIndex("budget_months_user_month_uq").on(t.userId, t.start),
+    index("budget_months_user_end_idx").on(t.userId, t.end),
+    check("budget_period_order", sql`${t.end} >= ${t.start}`),
+  ],
 );
 
 export const fixedExpenses = pgTable(
@@ -201,7 +213,7 @@ export const budgetLines = pgTable(
   "budget_lines",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    monthId: uuid("month_id").notNull().references(() => budgetMonths.id, { onDelete: "cascade" }),
+    monthId: uuid("month_id").notNull().references(() => budgetPeriods.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     categoryId: uuid("category_id").notNull().references(() => categories.id, { onDelete: "cascade" }),
     plannedMinor: money("planned_minor").notNull().default(0),

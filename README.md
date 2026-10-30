@@ -80,3 +80,14 @@ Every action that changes data reports back with a toast (`components/feedback.t
 ## Icons
 
 The browser tab icon is the two linked rings (the design notes "favicon drops the arrow"); home-screen and app icons use the full mark. All are generated from the logo by `node scripts/make-icons.mjs` (src/app/icon.svg, favicon.ico, apple-icon.png, public/icons/*); rerun it if the logo or brand green changes.
+
+## Pay cycles
+
+A budget can run from payday to payday (Settings → Income and payday → "Start my budget on payday") or by calendar month (the default for accounts created before cycles existed). Cycles are stored with explicit start and end dates (`budget_months.month` / `end_date`):
+
+- **Scheduled cycle:** from the most recent payday to the day before the next one, using the payday rule (set date, 25th, last working day, last day of the month, day before the month ends, weekly) and the weekend choice. See `cycleBounds()` in `src/lib/dates.ts`.
+- **"I've been paid"** (Overview): pay recorded late in a cycle starts the next cycle that day and runs to the payday after the one it replaced (paid 15 Dec for the 23rd → 15 Dec – 21 Jan). Pay recorded early in a cycle (late pay) moves the cycle's start. See `recordPay()` in `src/lib/budget.ts`.
+- **Fixed bills** are planned once per time their day falls inside a cycle, and re-planned whenever a cycle's dates change.
+- **Pages** take `?p=<any date in the cycle>` (old `?m=YYYY-MM` links still work).
+
+Run `npm test` for the payday and cycle checks.

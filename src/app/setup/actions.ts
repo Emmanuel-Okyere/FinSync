@@ -1,20 +1,20 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { budgetMonths, categories, fixedExpenses, incomes, users, type PayslipInput } from "@/db/schema";
+import { budgetPeriods, categories, fixedExpenses, incomes, users, type PayslipInput } from "@/db/schema";
 import { parsePayslipForm } from "@/lib/payslip-form";
 import { flash } from "@/lib/flash";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
-import { ensureCategories } from "@/lib/budget";
-import { monthStart, todayISO } from "@/lib/dates";
+import { ensureCategories, ensurePeriod, reshapeCurrentPeriod } from "@/lib/budget";
+import { fmtCycle, todayISO } from "@/lib/dates";
 import { parseMoney } from "@/lib/money";
 import { parseSchemeForm } from "@/lib/scheme-form";
 
-const PAYDAY = z.enum(["25th", "last_working_day", "weekly", "date"]);
+const PAYDAY = z.enum(["25th", "last_working_day", "weekly", "date", "last_day", "day_before_last"]);
 const KIND = z.enum(["salary", "business", "allowance", "other"]);
 
 export async function saveIncome(_: FormState, fd: FormData): Promise<FormState> {
@@ -33,6 +33,10 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
     const payday = PAYDAY.parse(fd.get("payday") ?? "last_working_day");
     const paydayDay = payday === "date" ? z.coerce.number().int().min(1).max(31).parse(fd.get("paydayDay")) : null;
     const paydayWeekend = z.enum(["before", "after", "same"]).catch("before").parse(fd.get("paydayWeekend"));
+    const budgetCycle = payday === "weekly" ? "calendar" : z.enum(["payday", "calendar"]).catch("payday").parse(fd.get("budgetCycle"));
+    const cycleChanged =
+      budgetCycle !== user.budgetCycle ||
+      (budgetCycle === "payday" && (payday !== user.paydayRule || paydayDay !== user.paydayDay || paydayWeekend !== user.paydayWeekend));
 
     const names = fd.getAll("extraName").map(String);
     const amounts = fd.getAll("extraAmount").map(String);
@@ -52,8 +56,15 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
         { userId: user.id, name: mainName, kind, amountMinor: main, variable: false, payslip },
         ...extras.map((x) => ({ userId: user.id, name: x.name, kind: "other", amountMinor: x.amount!, variable: true })),
       ]),
-      db.update(users).set({ paydayRule: payday, paydayDay, paydayWeekend, updatedAt: new Date() }).where(eq(users.id, user.id)),
+      db.update(users).set({ paydayRule: payday, paydayDay, paydayWeekend, budgetCycle, updatedAt: new Date() }).where(eq(users.id, user.id)),
     ]);
+    if (cycleChanged && user.onboardedAt) {
+      // Reshape the current budget to the new cycle right away.
+      const updated = { ...user, paydayRule: payday, paydayDay, paydayWeekend, budgetCycle };
+      await reshapeCurrentPeriod(updated);
+      const p = await ensurePeriod(updated, todayISO());
+      if (fd.get("returnTo") === "settings") return `Saved. Your budget now runs ${fmtCycle(p.start, p.end)}`;
+    }
     if (fd.get("returnTo") === "settings") return "Income saved";
     await flash("Income saved");
     redirect("/setup/scheme");
@@ -97,12 +108,12 @@ export async function saveFixed(_: FormState, fd: FormData): Promise<FormState> 
       rows.push({ userId: user.id, categoryId: cat.id, name, amountMinor: amt, dayOfMonth: day });
     }
 
-    const month = monthStart(todayISO());
+    const today = todayISO();
     await db.batch([
       db.delete(fixedExpenses).where(eq(fixedExpenses.userId, user.id)),
       ...(rows.length ? [db.insert(fixedExpenses).values(rows)] : []),
-      // Rebuild this month's plan from the new setup on next open.
-      db.delete(budgetMonths).where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, month))),
+      // Rebuild the current cycle's plan from the new setup on next open.
+      db.delete(budgetPeriods).where(and(eq(budgetPeriods.userId, user.id), lte(budgetPeriods.start, today), gte(budgetPeriods.end, today))),
       db.update(users).set({ onboardedAt: user.onboardedAt ?? new Date(), updatedAt: new Date() }).where(eq(users.id, user.id)),
     ] as unknown as Parameters<typeof db.batch>[0]);
     await flash("You're all set. Here's your month.");

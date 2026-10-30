@@ -2,8 +2,9 @@ import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, fixedExpenses, transactions } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
+import { ensurePeriod } from "@/lib/budget";
 import { incomeTotal } from "@/lib/budget";
-import { monthEnd, monthStart, todayISO, dayOf } from "@/lib/dates";
+import { dayOf, todayISO } from "@/lib/dates";
 import { cedis, toInputValue } from "@/lib/money";
 import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
@@ -19,7 +20,8 @@ const ord = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2
 export default async function Fixed() {
   const user = await requireOnboardedUser();
   const today = todayISO();
-  const month = monthStart(today);
+  const cycle = await ensurePeriod(user, today);
+  const month = cycle.start;
   const [rows, cats, logged, income] = await Promise.all([
     db
       .select({ f: fixedExpenses, catName: categories.name, icon: categories.icon, bucket: categories.bucket })
@@ -31,7 +33,7 @@ export default async function Fixed() {
     db
       .select({ id: transactions.fixedExpenseId })
       .from(transactions)
-      .where(and(eq(transactions.userId, user.id), isNotNull(transactions.fixedExpenseId), gte(transactions.occurredOn, month), lte(transactions.occurredOn, monthEnd(month)))),
+      .where(and(eq(transactions.userId, user.id), isNotNull(transactions.fixedExpenseId), gte(transactions.occurredOn, month), lte(transactions.occurredOn, cycle.end))),
     incomeTotal(user.id),
   ]);
   const loggedIds = new Set(logged.map((l) => l.id));

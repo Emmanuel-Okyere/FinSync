@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { incomes, savingsAccounts } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { cutSuggestions, monthView, paceOf } from "@/lib/budget";
-import { fmtWeekday, monthEnd, monthStart, todayISO } from "@/lib/dates";
+import { cutSuggestions, cycleConfig, paceOf, periodView } from "@/lib/budget";
+import { addDays, cycleEndFrom, dayOf, diffDays, fmtCycle, fmtShort, fmtWeekday, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { dailySpend, listTransactions } from "@/lib/queries";
 import { schemeLabel } from "@/lib/schemes";
@@ -14,33 +14,50 @@ import { PageHead } from "@/components/app/PageHead";
 import { Donut, WeekBars } from "@/components/app/charts";
 import { Amount, Bar, DiffTag, Empty, Tx } from "@/components/app/ui";
 import { moveBetweenLines } from "../_actions/budget";
+import { iveBeenPaid } from "../_actions/cycle";
+import { ActionForm, Dialog, Field, Submit } from "@/components/forms";
+import { toInputValue } from "@/lib/money";
 
 export const metadata = { title: "Overview · FinSync" };
 
 export default async function Home() {
   const user = await requireOnboardedUser();
   const today = todayISO();
-  const month = monthStart(today);
-  const v = await monthView(user, month);
+  const v = await periodView(user, today);
+  const { start, end } = v.period;
   const [recent, accounts, incomeRows, daily] = await Promise.all([
     listTransactions(user.id, { limit: 6 }),
     db.select().from(savingsAccounts).where(eq(savingsAccounts.userId, user.id)).orderBy(savingsAccounts.createdAt),
     db.select().from(incomes).where(eq(incomes.userId, user.id)),
-    dailySpend(user.id, month, monthEnd(month)),
+    dailySpend(user.id, start, end),
   ]);
   const cuts = cutSuggestions(v);
   const savedTotal = accounts.reduce((s, a) => s + a.balanceMinor, 0);
-  const weeks = [
-    [1, 7],
-    [8, 14],
-    [15, 21],
-    [22, v.days],
-  ].map(([a, b]) => ({
-    label: `${a}–${b}`,
-    actual: daily.slice(a - 1, b).reduce((s, x) => s + x, 0),
-    plan: Math.round((v.spendTarget * (b - a + 1)) / v.days),
-    future: a > v.day,
-  }));
+  // Four spans across the cycle (the last one takes the remainder), labelled by their dates.
+  const spans = [[0, 6], [7, 13], [14, 20], [21, v.days - 1]].filter(([a, b]) => a <= b);
+  const weeks = spans.map(([a, b]) => {
+    const from = addDays(start, a);
+    const to = addDays(start, b);
+    return {
+      label: from.slice(0, 7) === to.slice(0, 7) ? `${dayOf(from)}–${dayOf(to)}` : `${dayOf(from)}–${fmtShort(to)}`,
+      actual: daily.slice(a, b + 1).reduce((s, x) => s + x, 0),
+      plan: Math.round((v.spendTarget * (b - a + 1)) / v.days),
+      future: a + 1 > v.day,
+    };
+  });
+
+  // "I've been paid": what will happen if you tap it today.
+  const cfg = cycleConfig(user);
+  const payday = cfg.mode === "payday";
+  const lateInCycle = diffDays(start, today) >= (v.days - 0) / 2;
+  const showPaid = payday && (lateInCycle || !v.period.paidOn);
+  const paidOutcome = !payday
+    ? "We'll record what came in for this month."
+    : lateInCycle
+      ? `Your next budget cycle starts today and runs ${fmtCycle(today, cycleEndFrom(cfg, today, addDays(end, 1)))}.`
+      : today > start
+        ? `This cycle will start today (${fmtCycle(today, end)}), since your pay came after ${fmtShort(start)}.`
+        : `This cycle (${v.period.label}) will be marked as paid.`;
   const spendBuckets = v.buckets.filter((b) => b.key !== "savings");
 
   return (
@@ -55,7 +72,7 @@ export default async function Home() {
         </Link>
       </div>
       <div className="hide-mobile">
-        <PageHead title="Overview" sub={`${fmtWeekday(today)} · payday in ${v.daysLeft} day${v.daysLeft === 1 ? "" : "s"}`} />
+        <PageHead title="Overview" sub={`${fmtWeekday(today)} · ${payday ? `${v.period.label} · ` : ""}payday in ${v.daysLeft} day${v.daysLeft === 1 ? "" : "s"}`} />
       </div>
 
       <div className="sk-grid g-kpi">
@@ -73,9 +90,24 @@ export default async function Home() {
             <Bar hero value={v.spent} max={v.spendTarget} marker={v.day / v.days} thin />
           </div>
           <div className="sk-between sk-cap">
-            <span>Day {v.day} of {v.days}</span>
+            <span>{payday ? v.period.label : `Day ${v.day} of ${v.days}`}</span>
             <span>Payday in {v.daysLeft} day{v.daysLeft === 1 ? "" : "s"}</span>
           </div>
+          {showPaid ? (
+            <div>
+              <Dialog label="I've been paid" title="I've been paid" triggerClassName="sk-btn sk-btn--sm sk-btn--gold">
+                <ActionForm action={iveBeenPaid} className="sk-stack">
+                  <p className="sk-muted">{paidOutcome}</p>
+                  <div className="sk-grid g-2" style={{ gap: 10 }}>
+                    <Field name="date" label="Paid on" type="date" required defaultValue={today} max={today} />
+                    <Field name="amount" label="Amount received (GH₵)" inputMode="decimal" required defaultValue={toInputValue(v.income)} />
+                  </div>
+                  <p className="sk-cap">Got paid early (like in December)? This keeps your budget in step with the money you actually have.</p>
+                  <Submit>Confirm</Submit>
+                </ActionForm>
+              </Dialog>
+            </div>
+          ) : null}
         </div>
         <div className="sk-kpi hide-mobile">
           <div className="sk-over">Income</div>

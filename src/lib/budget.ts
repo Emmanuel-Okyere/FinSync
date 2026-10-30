@@ -1,10 +1,10 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   budgetLines,
-  budgetMonths,
+  budgetPeriods,
   categories,
   fixedExpenses,
   incomes,
@@ -13,7 +13,17 @@ import {
 } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import { DEFAULT_CATEGORIES, STARTER_SPLIT } from "@/lib/categories";
-import { addMonths, daysInMonth, dayOf, diffDays, monthEnd, monthStart, nextPayday, todayISO, type WeekendShift } from "@/lib/dates";
+import {
+  addDays,
+  cycleBounds,
+  cycleEndFrom,
+  diffDays,
+  fmtCycle,
+  occurrencesInRange,
+  todayISO,
+  type CycleConfig,
+  type WeekendShift,
+} from "@/lib/dates";
 import { DEFAULT_SCHEME, bucketFor } from "@/lib/schemes";
 
 export async function ensureCategories(userId: string) {
@@ -31,20 +41,91 @@ export async function incomeTotal(userId: string) {
   return Number(r.total);
 }
 
-/**
- * Returns the budget month row, creating it (and its lines) the first time a month is opened.
- * Idempotent and race-safe: unique keys + ON CONFLICT, creation runs as one atomic batch.
- */
-export async function ensureMonth(user: SessionUser, month: string) {
-  const [existing] = await db
+export type Period = typeof budgetPeriods.$inferSelect;
+
+export function cycleConfig(user: SessionUser): CycleConfig {
+  return {
+    mode: user.budgetCycle === "payday" ? "payday" : "calendar",
+    rule: user.paydayRule,
+    day: user.paydayDay,
+    weekend: user.paydayWeekend as WeekendShift,
+  };
+}
+
+async function periodContaining(userId: string, date: string) {
+  const [row] = await db
     .select()
-    .from(budgetMonths)
-    .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, month)));
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, userId), lte(budgetPeriods.start, date), gte(budgetPeriods.end, date)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Where a new cycle containing `date` should start and end, without overlapping cycles that already exist. */
+async function plannedBounds(user: SessionUser, date: string) {
+  let { start, end } = cycleBounds(cycleConfig(user), date);
+  const [before] = await db
+    .select({ end: budgetPeriods.end })
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), lte(budgetPeriods.end, date)))
+    .orderBy(desc(budgetPeriods.end))
+    .limit(1);
+  const [after] = await db
+    .select({ start: budgetPeriods.start })
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), gte(budgetPeriods.start, date)))
+    .orderBy(asc(budgetPeriods.start))
+    .limit(1);
+  if (before && before.end >= start) start = addDays(before.end, 1);
+  if (after && after.start <= end) end = addDays(after.start, -1);
+  return { start, end };
+}
+
+/** Planned amount per category for a fixed expense in a cycle: one charge per time its day falls inside it. */
+function fixedPlan(f: typeof fixedExpenses.$inferSelect, start: string, end: string) {
+  const n = f.dayOfMonth == null ? 1 : occurrencesInRange(f.dayOfMonth, start, end).length;
+  return f.amountMinor * n;
+}
+
+/** After a cycle's dates change, re-plan its fixed-bill lines for the new range (other lines are untouched). */
+async function replanFixed(userId: string, periodId: string) {
+  const [p] = await db.select().from(budgetPeriods).where(eq(budgetPeriods.id, periodId));
+  if (!p) return;
+  const fixed = await db
+    .select()
+    .from(fixedExpenses)
+    .where(and(eq(fixedExpenses.userId, userId), eq(fixedExpenses.active, true)));
+  const byCat = new Map<string, { amount: number; fixedId: string }>();
+  for (const f of fixed) {
+    const cur = byCat.get(f.categoryId);
+    byCat.set(f.categoryId, { amount: (cur?.amount ?? 0) + fixedPlan(f, p.start, p.end), fixedId: cur?.fixedId ?? f.id });
+  }
+  for (const [categoryId, { amount, fixedId }] of byCat) {
+    await db
+      .insert(budgetLines)
+      .values({ monthId: p.id, userId, categoryId, plannedMinor: amount, fixedExpenseId: fixedId })
+      .onConflictDoUpdate({ target: [budgetLines.monthId, budgetLines.categoryId], set: { plannedMinor: amount, fixedExpenseId: fixedId } });
+  }
+}
+
+/**
+ * Returns the budget cycle containing `date`, creating it (and its lines) the first time it's opened.
+ * Idempotent and race-safe: unique start + ON CONFLICT; creation runs as one atomic batch.
+ */
+export async function ensurePeriod(user: SessionUser, date: string): Promise<Period> {
+  const existing = await periodContaining(user.id, date);
   if (existing) {
-    if (month === monthStart(todayISO())) await autoLogFixed(user, existing.id, month);
+    await autoLogFixed(user, existing);
     return existing;
   }
+  const { start, end } = await plannedBounds(user, date);
+  const row = await createPeriod(user, start, end);
+  await autoLogFixed(user, row);
+  return row;
+}
 
+/** Creates a cycle with the given bounds: fixed bills per occurrence, other lines carried from the cycle before. */
+async function createPeriod(user: SessionUser, start: string, end: string): Promise<Period> {
   const scheme: Scheme = user.scheme ?? DEFAULT_SCHEME;
   const income = await incomeTotal(user.id);
   const cats = await db.select().from(categories).where(eq(categories.userId, user.id));
@@ -56,15 +137,19 @@ export async function ensureMonth(user: SessionUser, month: string) {
 
   const planned = new Map<string, { planned: number; fixedId: string | null }>();
   for (const f of fixed) {
+    const amount = fixedPlan(f, start, end);
+    if (!amount) continue; // not due in this (short) cycle
     const cur = planned.get(f.categoryId);
-    planned.set(f.categoryId, { planned: (cur?.planned ?? 0) + f.amountMinor, fixedId: cur?.fixedId ?? f.id });
+    planned.set(f.categoryId, { planned: (cur?.planned ?? 0) + amount, fixedId: cur?.fixedId ?? f.id });
   }
 
-  // Carry over variable lines from the previous month; otherwise seed a starter split.
+  // Carry over variable lines from the cycle before; otherwise seed a starter split.
   const [prev] = await db
     .select()
-    .from(budgetMonths)
-    .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, addMonths(month, -1))));
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), lte(budgetPeriods.end, addDays(start, -1))))
+    .orderBy(desc(budgetPeriods.end))
+    .limit(1);
   if (prev) {
     const prevLines = await db.select().from(budgetLines).where(eq(budgetLines.monthId, prev.id));
     for (const l of prevLines) if (!l.fixedExpenseId && !planned.has(l.categoryId)) planned.set(l.categoryId, { planned: l.plannedMinor, fixedId: null });
@@ -75,72 +160,69 @@ export async function ensureMonth(user: SessionUser, month: string) {
       let used = 0;
       for (const [catId, p] of planned) if (catBucket.get(catId) === b.key) used += p.planned;
       const left = Math.max(0, target - used);
-      const split = STARTER_SPLIT[b.key] ?? (b.key === "needs" ? [] : []);
-      for (const [name, share] of split) {
+      for (const [name, share] of STARTER_SPLIT[b.key] ?? []) {
         const c = byName.get(name);
         if (c && !planned.has(c.id)) planned.set(c.id, { planned: Math.floor((left * share) / 100) * 100, fixedId: null });
       }
     }
   }
 
-  const monthId = crypto.randomUUID();
+  const periodId = crypto.randomUUID();
   try {
     const lineRows = [...planned].map(([categoryId, p]) => ({
-      monthId,
+      monthId: periodId,
       userId: user.id,
       categoryId,
       plannedMinor: p.planned,
       fixedExpenseId: p.fixedId,
     }));
     const ops = [
-      db.insert(budgetMonths).values({ id: monthId, userId: user.id, month, scheme, incomeMinor: income }),
+      db.insert(budgetPeriods).values({ id: periodId, userId: user.id, start, end, scheme, incomeMinor: income }),
       ...(lineRows.length ? [db.insert(budgetLines).values(lineRows)] : []),
     ] as const;
     await db.batch(ops as unknown as Parameters<typeof db.batch>[0]);
   } catch (e) {
-    // Lost a race with a parallel request that created the month first; fall through and read it.
+    // Lost a race with a parallel request that created the cycle first; fall through and read it.
     if (!String(e).includes("budget_months_user_month_uq")) throw e;
   }
-  const [row] = await db
-    .select()
-    .from(budgetMonths)
-    .where(and(eq(budgetMonths.userId, user.id), eq(budgetMonths.month, month)));
-  if (month === monthStart(todayISO())) await autoLogFixed(user, row.id, month);
-  return row;
+  return (await periodContaining(user.id, start))!;
 }
 
-/** Logs fixed expenses whose day has arrived (once per month, guarded by dedupe key). */
-async function autoLogFixed(user: SessionUser, monthId: string, month: string) {
-  if (!user.settings.autoAddFixed) return;
-  const [m] = await db.select({ logged: budgetMonths.loggedFixed }).from(budgetMonths).where(eq(budgetMonths.id, monthId));
-  const already = new Set(m?.logged ?? []);
+/** Logs fixed expenses whose day has arrived in the current cycle (once per occurrence). */
+async function autoLogFixed(user: SessionUser, period: Period) {
   const today = todayISO();
-  const day = dayOf(today);
+  if (!user.settings.autoAddFixed || today < period.start || today > period.end) return;
+  const already = new Set(period.loggedFixed ?? []);
   const fixed = await db
     .select()
     .from(fixedExpenses)
     .where(and(eq(fixedExpenses.userId, user.id), eq(fixedExpenses.active, true)));
-  const due = fixed.filter((f) => !already.has(f.id) && f.dayOfMonth != null && Math.min(f.dayOfMonth, daysInMonth(month)) <= day);
+  const due = fixed.flatMap((f) =>
+    occurrencesInRange(f.dayOfMonth, period.start, today)
+      // Older rows stored a bare id for "logged this calendar month".
+      .filter((d) => !already.has(`${f.id}:${d}`) && !(already.has(f.id) && d.slice(0, 7) === period.start.slice(0, 7)))
+      .map((d) => ({ f, d })),
+  );
   if (!due.length) return;
   // Record first, so an entry the user deletes later isn't logged again.
   await db
-    .update(budgetMonths)
-    .set({ loggedFixed: sql`${budgetMonths.loggedFixed} || ${JSON.stringify(due.map((f) => f.id))}::jsonb` })
-    .where(eq(budgetMonths.id, monthId));
+    .update(budgetPeriods)
+    .set({ loggedFixed: sql`${budgetPeriods.loggedFixed} || ${JSON.stringify(due.map(({ f, d }) => `${f.id}:${d}`))}::jsonb` })
+    .where(eq(budgetPeriods.id, period.id));
   const inserted = await db
     .insert(transactions)
     .values(
-      due.map((f) => ({
+      due.map(({ f, d }) => ({
         userId: user.id,
         kind: "expense",
         amountMinor: f.amountMinor,
         categoryId: f.categoryId,
         name: f.name,
         method: "bank",
-        occurredOn: `${month.slice(0, 7)}-${String(Math.min(f.dayOfMonth!, daysInMonth(month))).padStart(2, "0")}`,
+        occurredOn: d,
         source: "fixed",
         fixedExpenseId: f.id,
-        dedupeKey: `fixed:${f.id}:${month.slice(0, 7)}`,
+        dedupeKey: `fixed:${f.id}:${d.slice(0, 7)}`,
       })),
     )
     .onConflictDoNothing()
@@ -150,8 +232,91 @@ async function autoLogFixed(user: SessionUser, monthId: string, month: string) {
     await db
       .update(budgetLines)
       .set({ done: true })
-      .where(and(eq(budgetLines.monthId, monthId), inArray(budgetLines.categoryId, catIds)));
+      .where(and(eq(budgetLines.monthId, period.id), inArray(budgetLines.categoryId, catIds)));
   }
+}
+
+/**
+ * "I've been paid" on `date`. Late in the cycle, it's next cycle's pay arriving early: the current cycle
+ * ends the day before and a new one starts (running to the payday after the one it replaces).
+ * Early in the cycle, it's this cycle's pay (on time or late): the cycle starts on that day.
+ */
+export async function recordPay(user: SessionUser, date: string, amountMinor: number) {
+  const cfg = cycleConfig(user);
+  const cur = await ensurePeriod(user, date);
+  const length = diffDays(cur.start, cur.end) + 1;
+  const intoCycle = diffDays(cur.start, date);
+
+  if (cfg.mode === "payday" && date > cur.start && intoCycle >= length / 2) {
+    // Early pay for the next cycle.
+    const replaced = addDays(cur.end, 1);
+    const [next] = await db
+      .select()
+      .from(budgetPeriods)
+      .where(and(eq(budgetPeriods.userId, user.id), eq(budgetPeriods.start, replaced)));
+    await db.update(budgetPeriods).set({ end: addDays(date, -1) }).where(eq(budgetPeriods.id, cur.id));
+    await replanFixed(user.id, cur.id);
+    if (next) {
+      await db.update(budgetPeriods).set({ start: date, paidOn: date, incomeMinor: amountMinor }).where(eq(budgetPeriods.id, next.id));
+      await replanFixed(user.id, next.id);
+      return { ...next, start: date };
+    }
+    const end = cycleEndFrom(cfg, date, replaced);
+    // Make sure nothing already starts inside the new cycle's range.
+    const [clash] = await db
+      .select({ start: budgetPeriods.start })
+      .from(budgetPeriods)
+      .where(and(eq(budgetPeriods.userId, user.id), gte(budgetPeriods.start, date), lte(budgetPeriods.start, end)))
+      .limit(1);
+    const created = await createPeriod(user, date, clash ? addDays(clash.start, -1) : end);
+    await db.update(budgetPeriods).set({ paidOn: date, incomeMinor: amountMinor }).where(eq(budgetPeriods.id, created.id));
+    return created;
+  }
+
+  if (cfg.mode === "payday" && date > cur.start) {
+    // This cycle's pay came late: the cycle starts when it landed; the previous one runs until then.
+    const [prev] = await db
+      .select()
+      .from(budgetPeriods)
+      .where(and(eq(budgetPeriods.userId, user.id), eq(budgetPeriods.end, addDays(cur.start, -1))));
+    if (prev) {
+      await db.update(budgetPeriods).set({ end: addDays(date, -1) }).where(eq(budgetPeriods.id, prev.id));
+      await replanFixed(user.id, prev.id);
+    }
+    await db.update(budgetPeriods).set({ start: date, paidOn: date, incomeMinor: amountMinor }).where(eq(budgetPeriods.id, cur.id));
+    await replanFixed(user.id, cur.id);
+    return { ...cur, start: date };
+  }
+
+  await db.update(budgetPeriods).set({ paidOn: date, incomeMinor: amountMinor }).where(eq(budgetPeriods.id, cur.id));
+  return cur;
+}
+
+/** After switching between payday and calendar cycles, reshape the current cycle to the new rule. */
+export async function reshapeCurrentPeriod(user: SessionUser) {
+  const today = todayISO();
+  const cur = await periodContaining(user.id, today);
+  if (!cur) return;
+  const { start, end } = cycleBounds(cycleConfig(user), today);
+  // Never reach back over a cycle that's already closed with pay recorded.
+  const [prev] = await db
+    .select()
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), lte(budgetPeriods.end, addDays(cur.start, -1))))
+    .orderBy(desc(budgetPeriods.end))
+    .limit(1);
+  let newStart = start;
+  if (prev && prev.start >= newStart) newStart = cur.start; // would swallow the previous cycle entirely: keep start
+  if (prev && newStart <= prev.end && newStart > prev.start) {
+    await db.update(budgetPeriods).set({ end: addDays(newStart, -1) }).where(eq(budgetPeriods.id, prev.id));
+    await replanFixed(user.id, prev.id);
+  }
+  // Drop any future cycles that the new shape now overlaps.
+  await db
+    .delete(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), gte(budgetPeriods.start, addDays(cur.start, 1)), lte(budgetPeriods.start, end)));
+  await db.update(budgetPeriods).set({ start: newStart, end }).where(eq(budgetPeriods.id, cur.id));
+  await replanFixed(user.id, cur.id);
 }
 
 export type LineView = {
@@ -169,15 +334,16 @@ export type LineView = {
 
 export type BucketView = { key: string; name: string; pct: number; target: number; planned: number; actual: number };
 
-export type MonthView = Awaited<ReturnType<typeof getMonthView>>;
+export type PeriodView = Awaited<ReturnType<typeof getPeriodView>>;
 
-/** Per-request memoised month view (layout and page share one computation). */
-export const monthView = cache((user: SessionUser, month: string) => getMonthView(user, month));
+/** Per-request memoised view of the cycle containing `date` (layout and page share one computation). */
+export const periodView = cache((user: SessionUser, date: string) => getPeriodView(user, date));
 
-export async function getMonthView(user: SessionUser, month: string) {
+export async function getPeriodView(user: SessionUser, date: string) {
   await ensureCategories(user.id);
-  const m = await ensureMonth(user, month);
-  const end = monthEnd(month);
+  const m = await ensurePeriod(user, date);
+  const start = m.start;
+  const end = m.end;
 
   const [lineRows, sums, incomeRows] = await Promise.all([
     db
@@ -207,7 +373,7 @@ export async function getMonthView(user: SessionUser, month: string) {
         and(
           eq(transactions.userId, user.id),
           eq(transactions.kind, "expense"),
-          gte(transactions.occurredOn, month),
+          gte(transactions.occurredOn, start),
           lte(transactions.occurredOn, end),
         ),
       )
@@ -219,7 +385,7 @@ export async function getMonthView(user: SessionUser, month: string) {
         and(
           eq(transactions.userId, user.id),
           eq(transactions.kind, "income"),
-          gte(transactions.occurredOn, month),
+          gte(transactions.occurredOn, start),
           lte(transactions.occurredOn, end),
         ),
       ),
@@ -259,11 +425,12 @@ export async function getMonthView(user: SessionUser, month: string) {
   }
 
   const today = todayISO();
-  const isCurrent = monthStart(today) === month;
-  const days = daysInMonth(month);
-  const day = isCurrent ? dayOf(today) : today > end ? days : 0;
-  const payday = isCurrent ? nextPayday(user.paydayRule, user.paydayDay, today, user.paydayWeekend as WeekendShift) : null;
-  const daysLeft = payday ? Math.max(1, diffDays(today, payday)) : 0;
+  const isCurrent = start <= today && today <= end;
+  const days = diffDays(start, end) + 1;
+  const day = isCurrent ? diffDays(start, today) + 1 : today > end ? days : 0;
+  // Next payday as the plan stands (the day after this cycle ends).
+  const payday = isCurrent ? addDays(end, 1) : null;
+  const daysLeft = isCurrent ? diffDays(today, end) + 1 : 0;
 
   const spendBuckets = buckets.filter((b) => b.key !== "savings");
   const spendTarget = spendBuckets.reduce((s, b) => s + b.target, 0);
@@ -276,7 +443,7 @@ export async function getMonthView(user: SessionUser, month: string) {
   const totalActual = buckets.reduce((s, b) => s + b.actual, 0);
 
   return {
-    month: m,
+    period: { ...m, label: fmtCycle(start, end) },
     scheme,
     lines,
     buckets,
@@ -319,7 +486,7 @@ export type Cut = {
 };
 
 /** Ways to finish the month on plan: cover overspends from untouched lines, then cap runaway wants. */
-export function cutSuggestions(v: MonthView): Cut[] {
+export function cutSuggestions(v: PeriodView): Cut[] {
   const cuts: Cut[] = [];
   const over = v.lines.filter((l) => l.actual > l.planned).sort((a, b) => b.actual - b.planned - (a.actual - a.planned));
   const donors = v.lines

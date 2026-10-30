@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
-import { addMonths, fmtMonthYear } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
 import { AddEntryButton } from "./AddEntry";
 
-export function MonthSwitch({ month, base, extra = "" }: { month: string; base: string; extra?: string }) {
-  const href = (m: string) => `${base}?m=${m.slice(0, 7)}${extra}`;
+/** Steps between budget cycles. `p` is any date inside the target cycle (a day past either end). */
+export function PeriodSwitch({ start, end, label, base, extra = "" }: { start: string; end: string; label: string; base: string; extra?: string }) {
+  const href = (d: string) => `${base}?p=${d}${extra}`;
+  const linkStyle = { height: 34, lineHeight: "34px", padding: "0 8px", display: "grid", placeItems: "center" } as const;
   return (
-    <nav className="sk-seg" style={{ padding: 3, flex: "none" }} aria-label="Month">
-      <Link href={href(addMonths(month, -1))} style={{ height: 34, lineHeight: "34px", padding: "0 8px", display: "grid", placeItems: "center" }} aria-label="Previous month">
+    <nav className="sk-seg" style={{ padding: 3, flex: "none" }} aria-label="Budget cycle">
+      <Link href={href(addDays(start, -1))} style={linkStyle} aria-label="Previous cycle">
         <Icon name="back" />
       </Link>
-      <span className="is-on" style={{ height: 34, lineHeight: "34px" }}>{fmtMonthYear(month)}</span>
-      <Link href={href(addMonths(month, 1))} style={{ height: 34, lineHeight: "34px", padding: "0 8px", display: "grid", placeItems: "center" }} aria-label="Next month">
+      <span className="is-on" style={{ height: 34, lineHeight: "34px" }}>{label}</span>
+      <Link href={href(addDays(end, 1))} style={linkStyle} aria-label="Next cycle">
         <Icon name="next" />
       </Link>
     </nav>

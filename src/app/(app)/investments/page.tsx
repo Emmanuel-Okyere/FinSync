@@ -3,7 +3,8 @@ import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, insurancePolicies, transactions } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { monthEnd, monthStart, todayISO } from "@/lib/dates";
+import { ensurePeriod } from "@/lib/budget";
+import { todayISO } from "@/lib/dates";
 import { KIND_LABEL, portfolio } from "@/lib/invest";
 import { cedis } from "@/lib/money";
 import { ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
@@ -21,14 +22,15 @@ const KIND_TONE: Record<string, string> = { pension: "var(--brand)", fund: "var(
 
 export default async function Investments() {
   const user = await requireOnboardedUser();
-  const month = monthStart(todayISO());
+  const cycle = await ensurePeriod(user, todayISO());
+  const month = cycle.start;
   const [p, investedThisMonth, premiums] = await Promise.all([
     portfolio(user.id),
     db
       .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}),0)` })
       .from(transactions)
       .innerJoin(categories, eq(categories.id, transactions.categoryId))
-      .where(and(eq(transactions.userId, user.id), eq(categories.name, "Investments"), gte(transactions.occurredOn, month), lte(transactions.occurredOn, monthEnd(month)))),
+      .where(and(eq(transactions.userId, user.id), eq(categories.name, "Investments"), gte(transactions.occurredOn, month), lte(transactions.occurredOn, cycle.end))),
     db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, user.id)),
   ]);
   const byKind = Object.entries(
@@ -56,7 +58,7 @@ export default async function Investments() {
       <div className="sk-grid g-4 hide-mobile">
         <div className="sk-kpi"><div className="sk-over">Investments</div><Amount minor={p.total} /><div className={`sk-cap ${p.growth >= 0 ? "t-income" : "t-expense"}`}>{p.growth >= 0 ? "+" : "−"}GH₵ {cedis(Math.abs(p.growth))} growth</div></div>
         <div className="sk-kpi"><div className="sk-over">Put in</div><Amount minor={p.invested} /><div className="sk-cap">Across {p.rows.length} holding{p.rows.length === 1 ? "" : "s"}</div></div>
-        <div className="sk-kpi"><div className="sk-over">Invested this month</div><Amount minor={Number(investedThisMonth[0]?.total ?? 0)} /><div className="sk-cap">From the Savings bucket · not spending</div></div>
+        <div className="sk-kpi"><div className="sk-over">Invested this cycle</div><Amount minor={Number(investedThisMonth[0]?.total ?? 0)} /><div className="sk-cap">From the Savings bucket · not spending</div></div>
         <div className="sk-kpi"><div className="sk-over">Insurance premiums</div><Amount minor={monthlyPremium} /><div className="sk-cap"><Link className="sk-link" href="/insurance">A month on average · {premiums.length} policies</Link></div></div>
       </div>
       <div className="sk-grid g-main">
