@@ -2,12 +2,13 @@ import Link from "next/link";
 import { requireOnboardedUser } from "@/lib/auth/session";
 import { periodView } from "@/lib/budget";
 import { ICON_CHOICES } from "@/lib/categories";
-import { fmtShort, parseDateParam } from "@/lib/dates";
+import { fmtShort, parseDateParam, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { PRESET_SCHEMES, schemeLabel } from "@/lib/schemes";
 import { ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { BudgetTable } from "@/components/app/BudgetLines";
+import { AddEntryButton } from "@/components/app/AddEntry";
 import { PeriodSwitch, PageHead } from "@/components/app/PageHead";
 import { SchemePicker } from "@/components/setup/SchemePicker";
 import { Amount, Bar, Empty } from "@/components/app/ui";
@@ -33,7 +34,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
     <>
       <PageHead
         title={user.budgetCycle === "payday" ? "Budget" : `${label} budget`}
-        sub={`${v.period.paidOn ? `Paid ${fmtShort(v.period.paidOn)} · ` : ""}${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income)} · ${v.doneCount} of ${v.lines.length} lines done`}
+        sub={`${v.period.paidOn ? `Paid ${fmtShort(v.period.paidOn)} · ` : ""}${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income + v.extraIncome)} · ${v.doneCount} of ${v.lines.length} lines paid`}
       >
         <PeriodSwitch start={start} end={end} label={label} base="/budget" extra={filter !== "all" ? `&b=${filter}` : ""} />
       </PageHead>
@@ -82,9 +83,9 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
                 </ActionForm>
               </Dialog>
             </div>
-            {lines.length ? <BudgetTable lines={lines} bucketNames={bucketNames} /> : <Empty title="No lines here yet">Add a line to start planning.</Empty>}
+            {lines.length ? <BudgetTable lines={lines} bucketNames={bucketNames} defaultDate={v.isCurrent ? todayISO() : start} /> : <Empty title="No lines here yet">Add a line to start planning.</Empty>}
             <p className="sk-cap" style={{ marginTop: 12 }}>
-              Tick the box to strike a line off. Actual fills in with the planned amount; change it if you paid more or less.
+              Actual is everything you&apos;ve logged under a line. Use <b>+</b> to add spending as it happens, change Planned any time, and tick a line when it&apos;s paid.
             </p>
           </div>
         </div>
@@ -104,6 +105,17 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
                 ) : null}
               </div>
             ))}
+            <div className="sk-stack" style={{ gap: 6, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+              <div className="sk-between sk-cap">
+                <span>Pay</span>
+                <b style={{ color: "var(--ink)" }}>GH₵ {cedis(v.income)}</b>
+              </div>
+              <div className="sk-between sk-cap">
+                <span>Extra income received</span>
+                <b className={v.extraIncome ? "t-income" : ""} style={v.extraIncome ? undefined : { color: "var(--ink)" }}>{v.extraIncome ? "+" : ""}GH₵ {cedis(v.extraIncome)}</b>
+              </div>
+              <AddEntryButton label="Add extra income" presetKind="income" className="" triggerClassName="sk-btn sk-btn--sm sk-btn--ghost" />
+            </div>
             <div className="sk-between sk-cap">
               <span>Left to spend or save</span>
               <Amount minor={v.income - v.totalActual} style={{ fontSize: 18 }} />
@@ -126,11 +138,10 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
           extra={
             <>
               <input type="hidden" name="periodId" value={periodId} />
-              <fieldset className="sk-seg" style={{ border: 0, margin: 0 }}>
-                <legend className="sr-only">Apply to</legend>
+              <div className="sk-seg" role="radiogroup" aria-label="Apply the new split to">
                 <label><input type="radio" name="apply" value="this" defaultChecked />Apply to this cycle</label>
                 <label><input type="radio" name="apply" value="next" />From next cycle</label>
-              </fieldset>
+              </div>
             </>
           }
           submit={<Submit>Save split</Submit>}

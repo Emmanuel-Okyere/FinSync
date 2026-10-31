@@ -18,6 +18,8 @@ export function EntryForm({
   inHousehold = false,
   initial,
   presetCategory,
+  defaultDate,
+  presetKind,
 }: {
   cats: EntryCat[];
   today: string;
@@ -25,8 +27,11 @@ export function EntryForm({
   inHousehold?: boolean;
   initial?: EntryInit;
   presetCategory?: string;
+  /** Date to prefill (e.g. a day inside the budget cycle being viewed). */
+  defaultDate?: string;
+  presetKind?: "income" | "expense";
 }) {
-  const [kind, setKind] = useState<"income" | "expense">(initial?.kind ?? "expense");
+  const [kind, setKind] = useState<"income" | "expense">(initial?.kind ?? presetKind ?? "expense");
   const list = useMemo(() => cats.filter((c) => c.kind === kind), [cats, kind]);
   const [catId, setCatId] = useState<string>(initial?.categoryId ?? presetCategory ?? "");
   const [amount, setAmount] = useState(initial?.amount ?? "");
@@ -61,17 +66,40 @@ export function EntryForm({
           </div>
         ) : null}
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="sk-label" style={{ marginBottom: 8 }}>Category</legend>
-          <div className="sk-chips sk-wrap" style={{ maxHeight: 128, overflowY: "auto" }}>
-            {list.map((c) => (
-              <label key={c.id} className="sk-chip">
-                <input type="radio" name="categoryId" value={c.id} checked={catId === c.id} onChange={() => setCatId(c.id)} required />
-                <Icon name={c.icon} />
-                {c.name}
-              </label>
-            ))}
+          <legend className="sk-label" style={{ marginBottom: 8 }}>{kind === "expense" ? "Budget line" : "Income type"}</legend>
+          <div className="sk-stack" style={{ gap: 8, maxHeight: 176, overflowY: "auto", padding: 2, margin: -2 }}>
+            {[
+              { title: kind === "expense" ? "In this budget" : null, items: list.filter((c) => kind !== "expense" || c.planned != null) },
+              { title: "Other categories", items: kind === "expense" ? list.filter((c) => c.planned == null) : [] },
+            ]
+              .filter((g) => g.items.length)
+              .map((g) => (
+                <div key={g.title ?? "all"} className="sk-stack" style={{ gap: 6 }}>
+                  {g.title && kind === "expense" ? <span className="sk-over">{g.title}</span> : null}
+                  <div className="sk-chips sk-wrap">
+                    {g.items.map((c) => {
+                      const left = c.planned != null ? c.planned - (c.actual ?? 0) : null;
+                      return (
+                        <label key={c.id} className="sk-chip">
+                          <input type="radio" name="categoryId" value={c.id} checked={catId === c.id} onChange={() => setCatId(c.id)} required />
+                          <Icon name={c.icon} />
+                          {c.name}
+                          {left != null && kind === "expense" ? (
+                            <span style={{ opacity: 0.75, fontWeight: 500 }}>· {left >= 0 ? `${cedi(left)} left` : `${cedi(-left)} over`}</span>
+                          ) : null}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
           </div>
           <FieldError name="categoryId" />
+          {kind === "income" && cat?.name === "Salary" ? (
+            <p className="sk-cap" style={{ marginTop: 6 }}>Your regular pay is already in your plan. To record it, use &ldquo;I&apos;ve been paid&rdquo; on the Overview instead.</p>
+          ) : kind === "income" ? (
+            <p className="sk-cap" style={{ marginTop: 6 }}>Extra income adds to this cycle&apos;s budget, split by your scheme.</p>
+          ) : null}
         </fieldset>
         <div className="sk-between">
           <span className="sk-row sk-cap">
@@ -86,7 +114,7 @@ export function EntryForm({
           <label className="sk-row sk-cap">
             <Icon name="calendar" />
             <span className="sr-only">Date</span>
-            <input type="date" name="occurredOn" defaultValue={initial?.occurredOn ?? today} max="2100-12-31" required style={{ border: 0, background: "transparent", color: "var(--ink)", fontWeight: 600 }} />
+            <input type="date" name="occurredOn" defaultValue={initial?.occurredOn ?? defaultDate ?? today} max="2100-12-31" required style={{ border: 0, background: "transparent", color: "var(--ink)", fontWeight: 600 }} />
           </label>
         </div>
         <div className="sk-grid g-2" style={{ gap: 10 }}>

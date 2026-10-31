@@ -42,11 +42,14 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
     const amounts = fd.getAll("extraAmount").map(String);
     if (names.length > 10) throw new UserError("Add at most 10 incomes.");
     const extras = names
-      .map((n, i) => ({ name: n.trim().slice(0, 60), amount: parseMoney(amounts[i] ?? "") }))
-      .filter((x) => x.name || x.amount);
+      .map((n, i) => {
+        const raw = (amounts[i] ?? "").trim();
+        return { name: n.trim().slice(0, 60), raw, amount: raw ? parseMoney(raw) : 0 };
+      })
+      .filter((x) => x.name || x.raw);
     for (const x of extras) {
-      if (!x.name) throw new UserError("Give each extra income a name.");
-      if (x.amount == null || x.amount <= 0) throw new UserError(`Enter an amount for ${x.name}.`);
+      if (!x.name) throw new UserError("Give each income that varies a name.");
+      if (x.amount == null) throw new UserError(`${x.name}: enter an amount like 700, or leave it blank.`);
     }
 
     const mainName = { salary: "Salary", business: "Business", allowance: "Allowance", other: "Main income" }[kind];
@@ -54,7 +57,7 @@ export async function saveIncome(_: FormState, fd: FormData): Promise<FormState>
       db.delete(incomes).where(eq(incomes.userId, user.id)),
       db.insert(incomes).values([
         { userId: user.id, name: mainName, kind, amountMinor: main, variable: false, payslip },
-        ...extras.map((x) => ({ userId: user.id, name: x.name, kind: "other", amountMinor: x.amount!, variable: true })),
+        ...extras.map((x) => ({ userId: user.id, name: x.name, kind: "other", amountMinor: x.amount ?? 0, variable: true })),
       ]),
       db.update(users).set({ paydayRule: payday, paydayDay, paydayWeekend, budgetCycle, updatedAt: new Date() }).where(eq(users.id, user.id)),
     ]);

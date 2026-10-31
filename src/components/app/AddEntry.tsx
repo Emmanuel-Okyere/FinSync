@@ -12,9 +12,23 @@ export function AddEntryProvider({ data, children }: { data: Data; children: Rea
   return <Ctx.Provider value={data}>{children}</Ctx.Provider>;
 }
 
-export function AddEntryButton({ fab = false, label = "Add entry", className, presetCategory }: { fab?: boolean; label?: string; className?: string; presetCategory?: string }) {
+export function AddEntryButton({
+  fab = false,
+  label = "Add entry",
+  className,
+  presetCategory,
+  presetKind,
+  triggerClassName = "sk-btn sk-btn--gold",
+}: {
+  fab?: boolean;
+  label?: string;
+  className?: string;
+  presetCategory?: string;
+  presetKind?: "income" | "expense";
+  triggerClassName?: string;
+}) {
   const d = useContext(Ctx);
-  const form = <EntryForm cats={d.cats} today={d.today} policies={d.policies} inHousehold={d.inHousehold} presetCategory={presetCategory} />;
+  const form = <EntryForm cats={d.cats} today={d.today} policies={d.policies} inHousehold={d.inHousehold} presetCategory={presetCategory} presetKind={presetKind} />;
   if (fab)
     return (
       <Dialog label={<Icon name="plus" />} ariaLabel="Add entry" title="New entry" triggerClassName="sk-fab">
@@ -23,10 +37,20 @@ export function AddEntryButton({ fab = false, label = "Add entry", className, pr
     );
   return (
     <span className={className ?? "hide-mobile"}>
-      <Dialog label={<><Icon name="plus" />{label}</>} title="New entry" triggerClassName="sk-btn sk-btn--gold">
+      <Dialog label={<><Icon name="plus" />{label}</>} title={presetKind === "income" ? "Add income" : "New entry"} triggerClassName={triggerClassName}>
         {form}
       </Dialog>
     </span>
+  );
+}
+
+/** "+" on a budget line: log spending straight into that line. */
+export function AddToLineButton({ categoryId, name, defaultDate }: { categoryId: string; name: string; defaultDate?: string }) {
+  const d = useContext(Ctx);
+  return (
+    <Dialog label={<Icon name="plus" />} ariaLabel={`Add spending to ${name}`} title={`Add to ${name}`} triggerClassName="sk-iconbtn sk-iconbtn--sm">
+      <EntryForm cats={d.cats} today={d.today} policies={d.policies} inHousehold={d.inHousehold} presetCategory={categoryId} defaultDate={defaultDate} />
+    </Dialog>
   );
 }
 

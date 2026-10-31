@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { budgetLines, budgetPeriods, categories, fixedExpenses, transactions, users } from "@/db/schema";
@@ -10,6 +10,7 @@ import { ensurePeriod, incomeTotal } from "@/lib/budget";
 import { addDays, todayISO } from "@/lib/dates";
 import { parseSchemeForm } from "@/lib/scheme-form";
 import { ICON_CHOICES } from "@/lib/categories";
+import { cedis } from "@/lib/money";
 
 /** Loads a line and proves it belongs to the user. */
 async function ownLine(user: SessionUser, lineId: string) {
@@ -25,116 +26,48 @@ async function ownLine(user: SessionUser, lineId: string) {
 
 type Range = { start: string; end: string };
 
-async function lineActual(userId: string, categoryId: string, period: Range) {
-  const [r] = await db
-    .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}), 0)` })
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.userId, userId),
-        eq(transactions.kind, "expense"),
-        eq(transactions.categoryId, categoryId),
-        gte(transactions.occurredOn, period.start),
-        lte(transactions.occurredOn, period.end),
-      ),
-    );
-  return Number(r.total);
-}
-
 /** The date to use for system entries in a cycle: today if it's the current cycle, else its first day. */
 function entryDate(period: Range) {
   const t = todayISO();
   return t >= period.start && t <= period.end ? t : period.start;
 }
 
-/** Strike a line off (fills Actual with the plan) or un-strike it (removes that fill). */
-export async function toggleLine(_: FormState, fd: FormData): Promise<FormState> {
+/**
+ * "Mark paid": optionally records a real payment against the line (amount you actually paid),
+ * then ticks the line as done for this cycle. Nothing is invented: no amount, no entry.
+ */
+export async function markLinePaid(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
     const { line, period, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
-    if (!line.done) {
-      const actual = await lineActual(user.id, line.categoryId, period);
-      const gap = line.plannedMinor - actual;
-      if (gap > 0) {
-        await db.insert(transactions).values({
-          userId: user.id,
-          kind: "expense",
-          amountMinor: gap,
-          categoryId: line.categoryId,
-          name: catName,
-          method: "other",
-          occurredOn: entryDate(period),
-          source: "strike",
-          note: "Struck off in budget",
-        });
-      }
-      await db.update(budgetLines).set({ done: true }).where(eq(budgetLines.id, line.id));
-      return `${catName} struck off`;
-    }
-    await db.batch([
-      db
-        .delete(transactions)
-        .where(
-          and(
-            eq(transactions.userId, user.id),
-            eq(transactions.categoryId, line.categoryId),
-            inArray(transactions.source, ["strike", "adjust"]),
-            gte(transactions.occurredOn, period.start),
-            lte(transactions.occurredOn, period.end),
-          ),
-        ),
-      db.update(budgetLines).set({ done: false }).where(eq(budgetLines.id, line.id)),
-    ]);
-    return `${catName} reopened`;
-  });
-}
-
-/** "Paid less/more than planned?" Adjusts Actual via a single adjustment entry. */
-export async function setLineActual(_: FormState, fd: FormData): Promise<FormState> {
-  return run(async () => {
-    const user = await actionUser();
-    const { line, period, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
-    const target = zMoney("Actual").parse(fd.get("actual") ?? "");
-    const actual = await lineActual(user.id, line.categoryId, period);
-    const delta = target - actual;
-    if (delta === 0) return "No change";
-
-    const [adj] = await db
-      .select()
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.userId, user.id),
-          eq(transactions.categoryId, line.categoryId),
-          inArray(transactions.source, ["strike", "adjust"]),
-          gte(transactions.occurredOn, period.start),
-          lte(transactions.occurredOn, period.end),
-        ),
-      )
-      .limit(1);
-
-    if (adj) {
-      const next = adj.amountMinor + delta;
-      if (next > 0) await db.update(transactions).set({ amountMinor: next }).where(eq(transactions.id, adj.id));
-      else if (next === 0) await db.delete(transactions).where(eq(transactions.id, adj.id));
-      else throw new UserError("That's less than the entries you logged. Edit those entries instead.", "actual");
-    } else if (delta > 0) {
+    const raw = String(fd.get("amount") ?? "").trim();
+    const amount = raw ? zMoney("Amount paid").parse(raw) : 0;
+    if (amount > 0) {
+      const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(entryDate(period)).parse(fd.get("date"));
+      const method = z.enum(["momo", "card", "bank", "cash", "other"]).catch("momo").parse(fd.get("method"));
       await db.insert(transactions).values({
         userId: user.id,
         kind: "expense",
-        amountMinor: delta,
+        amountMinor: amount,
         categoryId: line.categoryId,
         name: catName,
-        method: "other",
-        occurredOn: entryDate(period),
-        source: "adjust",
-        note: "Adjusted in budget",
+        method,
+        occurredOn: date,
+        source: "manual",
       });
-    } else {
-      throw new UserError("That's less than the entries you logged. Edit those entries instead.", "actual");
     }
     await db.update(budgetLines).set({ done: true }).where(eq(budgetLines.id, line.id));
-    return `${catName} updated`;
+    return amount > 0 ? `${catName}: GH₵ ${cedis(amount, 2)} paid` : `${catName} marked done`;
+  });
+}
+
+/** Un-tick a line. Entries you logged stay exactly as they are. */
+export async function reopenLine(_: FormState, fd: FormData): Promise<FormState> {
+  return run(async () => {
+    const user = await actionUser();
+    const { line, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
+    await db.update(budgetLines).set({ done: false }).where(eq(budgetLines.id, line.id));
+    return `${catName} reopened`;
   });
 }
 

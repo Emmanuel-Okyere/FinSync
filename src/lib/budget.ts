@@ -33,11 +33,15 @@ export async function ensureCategories(userId: string) {
     .onConflictDoNothing();
 }
 
+/**
+ * Regular pay a budget is planned from. Income that varies (side work, commission, irregular allowances)
+ * isn't counted in advance: it joins a cycle's budget when it's logged as income.
+ */
 export async function incomeTotal(userId: string) {
   const [r] = await db
     .select({ total: sql<string>`coalesce(sum(${incomes.amountMinor}), 0)` })
     .from(incomes)
-    .where(eq(incomes.userId, userId));
+    .where(and(eq(incomes.userId, userId), eq(incomes.variable, false)));
   return Number(r.total);
 }
 
@@ -378,19 +382,23 @@ export async function getPeriodView(user: SessionUser, date: string) {
         ),
       )
       .groupBy(transactions.categoryId, categories.bucket),
+    // Extra income received in this cycle (anything except regular salary, which "I've been paid" records).
     db
       .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}), 0)` })
       .from(transactions)
+      .leftJoin(categories, eq(categories.id, transactions.categoryId))
       .where(
         and(
           eq(transactions.userId, user.id),
           eq(transactions.kind, "income"),
+          sql`coalesce(${categories.name}, '') <> 'Salary'`,
           gte(transactions.occurredOn, start),
           lte(transactions.occurredOn, end),
         ),
       ),
   ]);
 
+  const extraIncome = Number(incomeRows[0]?.total ?? 0);
   const actualByCat = new Map(sums.map((s) => [s.categoryId ?? "none", { total: Number(s.total), n: Number(s.n), catBucket: s.catBucket }]));
   const scheme = m.scheme;
 
@@ -413,7 +421,8 @@ export async function getPeriodView(user: SessionUser, date: string) {
   const lineCats = new Set(lines.map((l) => l.categoryId));
   const buckets: BucketView[] = scheme.buckets.map((b) => ({
     ...b,
-    target: Math.round((m.incomeMinor * b.pct) / 100),
+    // Pay plus any extra income received this cycle, split by the scheme.
+    target: Math.round(((m.incomeMinor + extraIncome) * b.pct) / 100),
     planned: lines.filter((l) => l.bucket === b.key).reduce((s, l) => s + l.planned, 0),
     actual: lines.filter((l) => l.bucket === b.key).reduce((s, l) => s + l.actual, 0),
   }));
@@ -448,7 +457,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
     lines,
     buckets,
     income: m.incomeMinor,
-    extraIncome: Number(incomeRows[0]?.total ?? 0),
+    extraIncome,
     isCurrent,
     day,
     days,
@@ -462,7 +471,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
     savingsTarget: savings?.target ?? 0,
     totalPlanned,
     totalActual,
-    unassigned: m.incomeMinor - totalPlanned,
+    unassigned: m.incomeMinor + extraIncome - totalPlanned,
     doneCount: lines.filter((l) => l.done).length,
   };
 }

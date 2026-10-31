@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { ActionButton, useServerAction } from "@/components/forms";
-import { removeLine, setLineActual, setLinePlanned, toggleLine } from "@/app/(app)/_actions/budget";
+import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit, useServerAction } from "@/components/forms";
+import { AddToLineButton } from "@/components/app/AddEntry";
+import { markLinePaid, removeLine, reopenLine, setLinePlanned } from "@/app/(app)/_actions/budget";
 import type { LineView } from "@/lib/budget";
 
 const c0 = (m: number) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 0 }).format(Math.round(m / 100));
@@ -18,17 +19,50 @@ function Diff({ l }: { l: LineView }) {
   return <span className="sk-tag sk-tag--needs">{c0(d)} left</span>;
 }
 
-function Check({ l }: { l: LineView }) {
+/** Tick = "paid / done for this cycle". Ticking asks what you paid and records it; unticking keeps every entry. */
+function Check({ l, defaultDate }: { l: LineView; defaultDate: string }) {
+  if (l.done) {
+    return (
+      <ActionButton action={reopenLine} fields={{ id: l.id }} className="sk-check is-on" ariaLabel={`Reopen ${l.name}`}>
+        <Icon name="check" />
+      </ActionButton>
+    );
+  }
+  const remaining = Math.max(0, l.planned - l.actual);
   return (
-    <ActionButton action={toggleLine} fields={{ id: l.id }} className={`sk-check${l.done ? " is-on" : ""}`} ariaLabel={l.done ? `Reopen ${l.name}` : `Strike off ${l.name}`}>
-      {l.done ? <Icon name="check" /> : null}
-    </ActionButton>
+    <Dialog label={null} ariaLabel={`Mark ${l.name} paid`} title={`Mark ${l.name} paid`} triggerClassName="sk-check">
+      <ActionForm action={markLinePaid} className="sk-stack">
+        <input type="hidden" name="id" value={l.id} />
+        <p className="sk-muted">
+          {l.actual > 0
+            ? `You've logged GH₵ ${c2(l.actual)} of GH₵ ${c2(l.planned)} so far.`
+            : `Planned: GH₵ ${c2(l.planned)}. Nothing logged yet.`}{" "}
+          Enter anything still to record, or leave it at 0 to just mark it done.
+        </p>
+        <div className="sk-grid g-2" style={{ gap: 10 }}>
+          <Field name="amount" label="Paid now (GH₵)" inputMode="decimal" defaultValue={(remaining / 100).toFixed(2)} />
+          <Field name="date" label="Date" type="date" defaultValue={defaultDate} />
+        </div>
+        <SelectField name="method" label="Paid with" defaultValue="momo" options={[{ value: "momo", label: "MoMo" }, { value: "bank", label: "Bank" }, { value: "card", label: "Card" }, { value: "cash", label: "Cash" }, { value: "other", label: "Other" }]} />
+        <Submit>Mark paid</Submit>
+      </ActionForm>
+    </Dialog>
+  );
+}
+
+/** Actual = everything logged under the line; "+" adds more. */
+function ActualCell({ l, defaultDate }: { l: LineView; defaultDate: string }) {
+  return (
+    <span className="sk-row" style={{ gap: 8, justifyContent: "flex-end" }}>
+      <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{c2(l.actual)}</span>
+      <AddToLineButton categoryId={l.categoryId} name={l.name} defaultDate={defaultDate} />
+    </span>
   );
 }
 
 /** Inline money cell that saves on blur / Enter. */
-function MoneyCell({ l, field }: { l: LineView; field: "planned" | "actual" }) {
-  const action = field === "planned" ? setLinePlanned : setLineActual;
+function MoneyCell({ l, field }: { l: LineView; field: "planned" }) {
+  const action = setLinePlanned;
   const [state, run, pending] = useServerAction(action, { toastError: true });
   const initial = (l[field] / 100).toFixed(2);
   const [val, setVal] = useState(initial);
@@ -60,7 +94,7 @@ function MoneyCell({ l, field }: { l: LineView; field: "planned" | "actual" }) {
   );
 }
 
-export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketNames: Record<string, string> }) {
+export function BudgetTable({ lines, bucketNames, defaultDate }: { lines: LineView[]; bucketNames: Record<string, string>; defaultDate: string }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <>
@@ -69,7 +103,7 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
         <table className="sk-table">
           <thead>
             <tr>
-              <th style={{ width: 40 }}><span className="sr-only">Done</span></th>
+              <th style={{ width: 40 }}><span className="sr-only">Paid</span></th>
               <th>Line</th>
               <th>Bucket</th>
               <th className="r">Planned</th>
@@ -81,7 +115,7 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
           <tbody>
             {lines.map((l) => (
               <tr key={l.id} className={l.done ? "is-done" : ""}>
-                <td><Check l={l} /></td>
+                <td><Check l={l} defaultDate={defaultDate} /></td>
                 <td className="nm">
                   <span className="sk-row" style={{ gap: 10 }}>
                     <span className={`sk-tile sk-tile--sm sk-tile--${tone(l.bucket)}`}><Icon name={l.icon} /></span>
@@ -93,7 +127,7 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
                 </td>
                 <td><span className={`sk-tag sk-tag--${tone(l.bucket)}`}>{bucketNames[l.bucket] ?? l.bucket}</span></td>
                 <td className="r"><MoneyCell key={`p-${l.planned}`} l={l} field="planned" /></td>
-                <td className="r"><MoneyCell key={`a-${l.actual}`} l={l} field="actual" /></td>
+                <td className="r"><ActualCell l={l} defaultDate={defaultDate} /></td>
                 <td className="r"><Diff l={l} /></td>
                 <td className="r">
                   <ActionButton action={removeLine} fields={{ id: l.id }} className="sk-iconbtn" ariaLabel={`Remove ${l.name} from this month`} confirm={{ title: `Remove ${l.name} from this month?`, body: "Its entries stay in your transactions; only the plan line goes.", confirmLabel: "Remove", danger: true }}>
@@ -117,16 +151,16 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
         </table>
       </div>
 
-      {/* Phone: strike-off list, tap to open */}
+      {/* Phone: tap a line to change its plan; "+" logs spending into it */}
       <div className="hide-desktop">
         {lines.map((l) =>
           open === l.id ? (
             <div key={l.id} className="sk-bl" style={{ display: "block", background: "var(--surface-2)", borderRadius: "var(--radius-md)", padding: 12, margin: "4px -8px" }}>
               <div className="sk-row">
-                <Check l={l} />
+                <Check l={l} defaultDate={defaultDate} />
                 <div className="sk-bl__main">
                   <div className="sk-bl__name">{l.name}</div>
-                  <div className="sk-cap">Paid more or less than planned?</div>
+                  <div className="sk-cap">Change the plan any time this cycle</div>
                 </div>
                 <button type="button" className="sk-iconbtn" style={{ width: 34, height: 34 }} aria-label="Close" onClick={() => setOpen(null)}>
                   <Icon name="close" />
@@ -134,16 +168,19 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
                 <div className="sk-mini"><small>Planned</small><MoneyCell key={`p-${l.planned}`} l={l} field="planned" /></div>
-                <div className="sk-mini"><small>Actual</small><MoneyCell key={`a-${l.actual}`} l={l} field="actual" /></div>
+                <div className="sk-mini"><small>Spent so far</small><b>{c2(l.actual)}</b></div>
               </div>
               <div className="sk-between" style={{ marginTop: 10 }}>
                 <Diff l={l} />
-                <button type="button" className="sk-btn sk-btn--sm" onClick={() => setOpen(null)}>Done</button>
+                <span className="sk-row" style={{ gap: 8 }}>
+                  <AddToLineButton categoryId={l.categoryId} name={l.name} defaultDate={defaultDate} />
+                  <button type="button" className="sk-btn sk-btn--sm" onClick={() => setOpen(null)}>Done</button>
+                </span>
               </div>
             </div>
           ) : (
             <div key={l.id} className={`sk-bl${l.done ? " is-done" : ""}`}>
-              <Check l={l} />
+              <Check l={l} defaultDate={defaultDate} />
               <button type="button" className="sk-bl__main" style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer" }} onClick={() => setOpen(l.id)} aria-label={`Edit ${l.name}`}>
                 <div className="sk-bl__name">{l.name}</div>
                 <div className="sk-row" style={{ marginTop: 2 }}>
@@ -155,6 +192,7 @@ export function BudgetTable({ lines, bucketNames }: { lines: LineView[]; bucketN
                 <div className="sk-bl__act">{c0(l.actual)}</div>
                 <div className="sk-bl__plan">of {c0(l.planned)}</div>
               </div>
+              <AddToLineButton categoryId={l.categoryId} name={l.name} defaultDate={defaultDate} />
             </div>
           ),
         )}

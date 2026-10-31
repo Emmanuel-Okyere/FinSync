@@ -80,7 +80,9 @@ export function IncomeForm({
       ? nextPaydayDetail(payday, payday === "date" ? dayNum : null, today, weekend)
       : null;
   const [extras, setExtras] = useState<Extra[]>(initial.extras);
-  const total = parse(main) + extras.reduce((s, e) => s + parse(e.amount), 0);
+  // Only regular pay is planned; income that varies is counted when it actually arrives.
+  const total = parse(main);
+  const hasVarying = extras.some((e) => e.name.trim() || parse(e.amount));
 
   return (
     <ActionForm action={action} className={compact ? "sk-setup sk-setup--stack" : "sk-setup"}>
@@ -245,7 +247,8 @@ export function IncomeForm({
         </fieldset>
 
         <div className="sk-card sk-card--pad">
-          <div className="sk-over" style={{ marginBottom: 6 }}>Other income</div>
+          <div className="sk-over" style={{ marginBottom: 2 }}>Income that varies</div>
+          <p className="sk-cap" style={{ marginBottom: 6 }}>Commission, side work, allowances paid at odd times… List them here for your records.</p>
           {extras.map((e, i) => (
             <div key={i} className="sk-tx" style={{ alignItems: "flex-end" }}>
               <div className="sk-tile sk-tile--income hide-mobile">
@@ -256,7 +259,7 @@ export function IncomeForm({
                 <input id={`en-${i}`} className="sk-input sk-input--sm" name="extraName" value={e.name} maxLength={60} onChange={(ev) => setExtras(extras.map((x, j) => (j === i ? { ...x, name: ev.target.value } : x)))} placeholder="Side work" />
               </div>
               <div className="sk-field" style={{ width: 130 }}>
-                <label htmlFor={`ea-${i}`}>About (GH₵)</label>
+                <label htmlFor={`ea-${i}`}>Usually (GH₵, optional)</label>
                 <input id={`ea-${i}`} className="sk-input sk-input--sm" name="extraAmount" inputMode="decimal" value={e.amount} maxLength={14} onChange={(ev) => setExtras(extras.map((x, j) => (j === i ? { ...x, amount: ev.target.value } : x)))} placeholder="700" />
               </div>
               <button type="button" className="sk-iconbtn" aria-label={`Remove ${e.name || "income"}`} onClick={() => setExtras(extras.filter((_, j) => j !== i))}>
@@ -265,20 +268,20 @@ export function IncomeForm({
             </div>
           ))}
           <button type="button" className="sk-tx sk-link" style={{ width: "100%", border: 0 }} onClick={() => setExtras([...extras, { name: "", amount: "" }])} disabled={extras.length >= 10}>
-            <Icon name="plus" /> Add another income
+            <Icon name="plus" /> Add income that varies
           </button>
-          <p className="sk-cap">Changes month to month? Put a typical amount; log the real one when it arrives.</p>
+          <p className="sk-cap">We don&apos;t count these until they arrive. When one is paid, add it as income and that cycle&apos;s budget grows by the amount.</p>
         </div>
       </div>
 
       <aside className="sk-stack sk-setup__aside" style={{ gap: 16 }}>
         <div className="sk-card sk-card--pad sk-stack" style={{ gap: 6 }}>
-          <div className="sk-over">Each month</div>
+          <div className="sk-over">Regular pay each month</div>
           <div className="sk-num" style={{ fontSize: 34, lineHeight: "40px" }}>
             <span className="sk-cur">GH₵</span>
             {fmt(total)}
           </div>
-          <div className="sk-cap">{[main && `Main ${fmt(parse(main))}`, ...extras.filter((e) => parse(e.amount)).map((e) => `${e.name || "other"} ${fmt(parse(e.amount))}`)].filter(Boolean).join(" + ")}</div>
+          <div className="sk-cap">{hasVarying ? "Plus income that varies, when it arrives" : "Your budget is planned from this"}</div>
         </div>
         <div className="sk-card sk-card--flat sk-card--pad sk-stack" style={{ gap: 6 }}>
           <b>Why we ask</b>

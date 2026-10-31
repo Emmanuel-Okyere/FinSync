@@ -340,3 +340,9 @@ dialog.sk-confirm { max-width: 420px; }
 /* Segmented controls that must fit narrow spaces: let options shrink instead of overflowing */
 .sk-seg--fit > * { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 420px) { .sk-seg--fit > * { font-size: 13px; padding: 0 4px; } }
+/* Visually hidden helpers must stay hidden inside segmented controls too. */
+.sk-seg > .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+.sk-iconbtn--sm { width: 32px; height: 32px; }
+.sk-iconbtn--sm .ic { width: 16px; height: 16px; }
+/* Dialogs can be opened from right-aligned table cells: reset text alignment inside them. */
+dialog.sk-dialog { text-align: left; }

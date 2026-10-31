@@ -115,7 +115,7 @@ export function SchemePicker({
               <b className="sk-num">GH₵ {cedi((income * (Number(b.pct) || 0)) / 100)}</b>
             </div>
           ))}
-          <p className="sk-cap">You can switch schemes any month.</p>
+          <p className="sk-cap">You can switch schemes any cycle.</p>
         </div>
         {extra}
         {submit}

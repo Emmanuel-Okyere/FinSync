@@ -1,6 +1,6 @@
 # FinSync
 
-Personal budgeting for Ghana: split your pay with a scheme (50/30/20 and friends), strike off bills as you pay them, and see what's safe to spend today. Built from the FinSync design canvas (Sika design system).
+Personal budgeting for Ghana: split your pay with a scheme (50/30/20 and friends), log spending against your budget lines as it happens, and see what's safe to spend today. Built from the FinSync design canvas (Sika design system).
 
 **Stack:** Next.js 16 (App Router, Server Actions, `proxy.ts`), Neon Postgres + Drizzle ORM, JWT auth with rotating refresh tokens, GIANT SMS (sender ID `AwoshieSDA`).
 
@@ -91,3 +91,9 @@ A budget can run from payday to payday (Settings → Income and payday → "Star
 - **Pages** take `?p=<any date in the cycle>` (old `?m=YYYY-MM` links still work).
 
 Run `npm test` for the payday and cycle checks.
+
+## Budget lines and income
+
+- **Lines work like categories.** A line's Actual is the total of the expenses logged under it in the cycle; "+" on a line logs spending straight into it. Planned can change any time. Ticking a line ("Mark paid") optionally records a real payment for what's still due; unticking never deletes entries.
+- **Regular pay** (non-varying incomes) is what a cycle is planned from, and "I've been paid" records what actually arrived.
+- **Income that varies** (side work, commission, irregular allowances) isn't counted in advance. When it's logged as income (any category except Salary), the cycle's bucket targets grow by it, split by the scheme, so safe-to-spend rises immediately.

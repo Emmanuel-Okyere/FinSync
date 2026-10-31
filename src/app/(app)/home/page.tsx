@@ -111,8 +111,11 @@ export default async function Home() {
         </div>
         <div className="sk-kpi hide-mobile">
           <div className="sk-over">Income</div>
-          <Amount minor={v.income} className="t-income" />
-          <div className="sk-cap t-income">{incomeRows.map((i) => `${i.name} ${cedis(i.amountMinor)}`).join(" · ")}</div>
+          <Amount minor={v.income + v.extraIncome} className="t-income" />
+          <div className="sk-cap t-income">
+            Pay {cedis(v.income)}
+            {v.extraIncome ? ` · extra ${cedis(v.extraIncome)} received` : incomeRows.some((i) => i.variable) ? " · extra income counts when it arrives" : ""}
+          </div>
         </div>
         <div className="sk-kpi hide-mobile">
           <div className="sk-over">Spent</div>
@@ -164,9 +167,9 @@ export default async function Home() {
             <b className="sk-h">Your split</b>
             <Link className="sk-link" style={{ fontSize: 14 }} href="/budget#scheme">Change</Link>
           </div>
-          <div className="sk-cap">{schemeLabel(v.scheme)} on GH₵ {cedis(v.income)}</div>
+          <div className="sk-cap">{schemeLabel(v.scheme)} on GH₵ {cedis(v.income + v.extraIncome)}</div>
           <div className="sk-row" style={{ gap: 20, marginTop: 16 }}>
-            <Donut parts={v.buckets.map((b) => ({ key: b.key, value: b.actual }))} total={v.income} label="Spending by bucket" />
+            <Donut parts={v.buckets.map((b) => ({ key: b.key, value: b.actual }))} total={v.income + v.extraIncome} label="Spending by bucket" />
             <div className="sk-stack grow" style={{ gap: 12, fontSize: 14 }}>
               {v.buckets.map((b) => (
                 <div key={b.key}>
