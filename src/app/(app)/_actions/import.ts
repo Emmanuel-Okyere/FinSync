@@ -11,6 +11,7 @@ import { ensureCategories } from "@/lib/budget";
 import { extractRows, parseCsv, rowHash, suggestCategory } from "@/lib/import";
 import { enforce } from "@/lib/rate-limit";
 import { flash } from "@/lib/flash";
+import { chargesCategoryId } from "@/lib/charges";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 
@@ -79,9 +80,12 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
       .returning({ id: importBatches.id });
     if (!claimed.length) throw new UserError("This import is already finished.");
 
+    const withFees = chosen.some((r) => r.kind === "expense" && r.feeMinor);
+    const feeCat = withFees ? await chargesCategoryId(user.id) : null;
     for (let i = 0; i < chosen.length; i += 500) {
-      await db.insert(transactions).values(
-        chosen.slice(i, i + 500).map((r) => ({
+      const slice = chosen.slice(i, i + 500);
+      const inserted = await db.insert(transactions).values(
+        slice.map((r) => ({
           userId: user.id,
           kind: r.kind,
           amountMinor: r.amountMinor,
@@ -92,7 +96,23 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
           source: "import",
           importHash: r.hash,
         })),
-      );
+      ).returning({ id: transactions.id });
+      // The statement's own fee column becomes a linked "Transfer charges" entry.
+      const fees = slice
+        .map((r, j) => ({ r, parentId: inserted[j]?.id }))
+        .filter(({ r, parentId }) => parentId && r.kind === "expense" && r.feeMinor && r.feeMinor > 0)
+        .map(({ r, parentId }) => ({
+          userId: user.id,
+          kind: "expense" as const,
+          amountMinor: r.feeMinor!,
+          categoryId: feeCat,
+          name: `Charge · ${r.name}`.slice(0, 80),
+          method: r.method,
+          occurredOn: r.occurredOn,
+          source: "fee",
+          feeForId: parentId!,
+        }));
+      if (fees.length) await db.insert(transactions).values(fees);
     }
     await flash(`${chosen.length} entr${chosen.length === 1 ? "y" : "ies"} imported`);
     redirect(`/import/${batch.id}/done`);

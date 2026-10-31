@@ -11,6 +11,8 @@ import { addDays, todayISO } from "@/lib/dates";
 import { parseSchemeForm } from "@/lib/scheme-form";
 import { ICON_CHOICES } from "@/lib/categories";
 import { cedis } from "@/lib/money";
+import { ruleFee, syncCharge } from "@/lib/charges";
+import { METHOD_VALUES } from "@/lib/fees";
 
 /** Loads a line and proves it belongs to the user. */
 async function ownLine(user: SessionUser, lineId: string) {
@@ -42,10 +44,14 @@ export async function markLinePaid(_: FormState, fd: FormData): Promise<FormStat
     const { line, period, catName } = await ownLine(user, zUuid.parse(fd.get("id")));
     const raw = String(fd.get("amount") ?? "").trim();
     const amount = raw ? zMoney("Amount paid").parse(raw) : 0;
+    let fee = 0;
     if (amount > 0) {
       const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(entryDate(period)).parse(fd.get("date"));
-      const method = z.enum(["momo", "card", "bank", "cash", "other"]).catch("momo").parse(fd.get("method"));
-      await db.insert(transactions).values({
+      const method = z.enum(METHOD_VALUES).catch("momo").parse(fd.get("method"));
+      const feeRaw = String(fd.get("fee") ?? "").trim();
+      fee = fd.get("feeUi") ? (fd.get("addFee") === "on" ? (feeRaw ? zMoney("Charge").parse(feeRaw) : ruleFee(user, amount, method)) : 0) : ruleFee(user, amount, method);
+      if (fee > amount) throw new UserError("The charge can't be more than the amount.", "fee");
+      const [tx] = await db.insert(transactions).values({
         userId: user.id,
         kind: "expense",
         amountMinor: amount,
@@ -54,10 +60,11 @@ export async function markLinePaid(_: FormState, fd: FormData): Promise<FormStat
         method,
         occurredOn: date,
         source: "manual",
-      });
+      }).returning();
+      if (fee) await syncCharge(user.id, tx, fee);
     }
     await db.update(budgetLines).set({ done: true }).where(eq(budgetLines.id, line.id));
-    return amount > 0 ? `${catName}: GH₵ ${cedis(amount, 2)} paid` : `${catName} marked done`;
+    return amount > 0 ? `${catName}: GH₵ ${cedis(amount, 2)} paid${fee ? `, plus GH₵ ${cedis(fee, 2)} charge` : ""}` : `${catName} marked done`;
   });
 }
 
@@ -176,6 +183,8 @@ const fixedSchema = z.object({
     .optional()
     .transform((s) => (s ? Number(s) : null))
     .pipe(z.number().int().min(1, "Day 1–31").max(31, "Day 1–31").nullable()),
+  method: z.enum(METHOD_VALUES).catch("bank"),
+  noCharge: z.string().optional(),
 });
 
 async function ownCategoryId(userId: string, id: string) {
@@ -193,14 +202,14 @@ export async function saveFixedExpense(_: FormState, fd: FormData): Promise<Form
     if (id) {
       const r = await db
         .update(fixedExpenses)
-        .set({ name: d.name, categoryId, amountMinor: d.amount, dayOfMonth: d.day })
+        .set({ name: d.name, categoryId, amountMinor: d.amount, dayOfMonth: d.day, method: d.method, noCharge: d.noCharge === "on" })
         .where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, user.id)))
         .returning({ id: fixedExpenses.id });
       if (!r.length) throw new UserError("That fixed expense no longer exists.");
     } else {
       const [f] = await db
         .insert(fixedExpenses)
-        .values({ userId: user.id, categoryId, name: d.name, amountMinor: d.amount, dayOfMonth: d.day })
+        .values({ userId: user.id, categoryId, name: d.name, amountMinor: d.amount, dayOfMonth: d.day, method: d.method, noCharge: d.noCharge === "on" })
         .returning();
       // Add it to this cycle's plan right away.
       const [m] = [await ensurePeriod(user, todayISO())];

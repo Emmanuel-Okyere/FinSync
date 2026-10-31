@@ -1,4 +1,5 @@
 import { cedis } from "@/lib/money";
+import { METHOD_LABEL } from "@/lib/fees";
 import { bucketTone } from "@/lib/schemes";
 import { relDay } from "@/lib/dates";
 import type { EntryInit } from "./EntryForm";
@@ -36,7 +37,7 @@ export function DiffTag({ planned, actual, done }: { planned: number; actual: nu
   return <span className="sk-tag sk-tag--needs">{cedis(diff)} left</span>;
 }
 
-export const METHOD_LABEL: Record<string, string> = { momo: "MoMo", card: "Card", bank: "Bank", cash: "Cash", other: "Other" };
+export { METHOD_LABEL };
 
 export type TxLike = {
   id: string;
@@ -50,6 +51,7 @@ export type TxLike = {
   catName: string | null;
   catIcon: string | null;
   catBucket: string | null;
+  feeMinor?: number;
 };
 
 export function txTone(t: TxLike) {
@@ -68,13 +70,14 @@ export function Tx({ t, meta, highlight }: { t: TxLike; meta?: string; highlight
     method: t.method,
     name: t.name,
     note: t.note,
+    feeMinor: t.feeMinor ?? 0,
   };
   return (
     <TxRow
       entry={entry}
       icon={t.catIcon ?? (t.kind === "income" ? "arrowDownLeft" : "tag")}
       tone={txTone(t)}
-      meta={meta ?? `${relDay(t.occurredOn)} · ${t.catName ?? METHOD_LABEL[t.method] ?? ""}`}
+      meta={`${meta ?? `${relDay(t.occurredOn)} · ${t.catName ?? METHOD_LABEL[t.method] ?? ""}`}${t.feeMinor ? ` · +${cedis(t.feeMinor, 2)} charge` : ""}`}
       amountText={`${t.kind === "income" ? "+" : "−"}${cedis(t.amountMinor, 2)}`}
       amountClass={t.kind === "income" ? "t-income" : ""}
       highlight={highlight}

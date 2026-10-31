@@ -60,7 +60,7 @@ export default async function ImportReview({ params, searchParams }: { params: P
                           {cats.filter((c) => c.kind === r.kind).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </td>
-                      <td className={`r ${r.kind === "income" ? "t-income" : ""}`}>{r.kind === "income" ? "+" : "−"}{cedis(r.amountMinor, 2)}</td>
+                      <td className={`r ${r.kind === "income" ? "t-income" : ""}`}>{r.kind === "income" ? "+" : "−"}{cedis(r.amountMinor, 2)}{r.feeMinor ? <span className="sk-cap" style={{ display: "block" }}>+{cedis(r.feeMinor, 2)} charge</span> : null}</td>
                     </tr>
                   );
                 })}

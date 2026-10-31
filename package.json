@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "test:paye": "node --experimental-strip-types --no-warnings scripts/test-paye.mts",
     "test:dates": "node --experimental-strip-types --no-warnings scripts/test-dates.mts",
-    "test": "npm run test:paye && npm run test:dates"
+    "test": "npm run test:paye && npm run test:dates && npm run test:fees",
+    "test:fees": "node --experimental-strip-types --no-warnings --conditions=react-server scripts/test-fees.mts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",

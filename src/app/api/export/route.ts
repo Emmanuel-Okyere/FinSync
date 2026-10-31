@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
   }
-  const rows = await listTransactions(user.id, { from, to, limit: 20_000 });
+  const rows = await listTransactions(user.id, { from, to, limit: 20_000, includeCharges: true });
   const lines = [
     ["Date", "Type", "Name", "Category", "Paid with", "Amount (GHS)", "Note"].join(","),
     ...rows.map((r) =>

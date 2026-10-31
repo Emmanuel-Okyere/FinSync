@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { categories, transactions } from "@/db/schema";
 
@@ -15,6 +15,8 @@ export const txSelect = {
   catName: categories.name,
   catIcon: categories.icon,
   catBucket: categories.bucket,
+  // Linked transfer charge on this payment (charges themselves are listed only in exports).
+  feeMinor: sql<number>`coalesce((select f.amount_minor from transactions f where f.fee_for_id = ${transactions.id} limit 1), 0)::int`,
 };
 
 /** Escapes LIKE wildcards so user search text is matched literally. */
@@ -24,9 +26,11 @@ export function likeEscape(s: string) {
 
 export async function listTransactions(
   userId: string,
-  opts: { from?: string; to?: string; q?: string; kind?: "income" | "expense"; bucket?: string; method?: string; categoryId?: string; minAmount?: number; limit?: number; offset?: number } = {},
+  opts: { from?: string; to?: string; q?: string; kind?: "income" | "expense"; bucket?: string; method?: string; categoryId?: string; minAmount?: number; limit?: number; offset?: number; includeCharges?: boolean } = {},
 ) {
   const where: SQL[] = [eq(transactions.userId, userId)];
+  // Charges show under their parent payment, unless asked for (export) or browsing the charges category.
+  if (!opts.includeCharges && !opts.categoryId) where.push(isNull(transactions.feeForId));
   if (opts.from) where.push(gte(transactions.occurredOn, opts.from));
   if (opts.to) where.push(lte(transactions.occurredOn, opts.to));
   if (opts.kind) where.push(eq(transactions.kind, opts.kind));

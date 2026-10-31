@@ -9,6 +9,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
   { name: "Transport", bucket: "needs", icon: "bus" },
   { name: "Insurance", bucket: "needs", icon: "shield" },
   { name: "Debt repayment", bucket: "needs", icon: "card" },
+  { name: "Transfer charges", bucket: "needs", icon: "bank" },
   { name: "Health", bucket: "needs", icon: "heart" },
   { name: "Eating out", bucket: "wants", icon: "utensils" },
   { name: "Clothing", bucket: "wants", icon: "shirt" },
@@ -26,14 +27,14 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
 
 /** Starter fixed expenses shown on setup step 3 (amounts are suggestions in GH₵). */
 export const SUGGESTED_FIXED = [
-  { name: "Rent", category: "Rent", amount: 1500, day: 1, on: true },
-  { name: "Electricity", category: "Electricity", amount: 250, day: 5, on: true },
-  { name: "Home internet", category: "Home internet", amount: 350, day: 10, on: true },
-  { name: "Water", category: "Water", amount: 80, day: 15, on: true },
-  { name: "Church giving", category: "Church giving", amount: 300, day: null, on: false },
-  { name: "Gym", category: "Gym", amount: 200, day: 25, on: false },
-  { name: "Streaming", category: "Streaming", amount: 70, day: 1, on: false },
-  { name: "Data bundle", category: "Data & airtime", amount: 150, day: 1, on: false },
+  { name: "Rent", category: "Rent", amount: 1500, day: 1, on: true, method: "bank", noCharge: false },
+  { name: "Electricity", category: "Electricity", amount: 250, day: 5, on: true, method: "momopay", noCharge: false },
+  { name: "Home internet", category: "Home internet", amount: 350, day: 10, on: true, method: "momopay", noCharge: false },
+  { name: "Water", category: "Water", amount: 80, day: 15, on: true, method: "momopay", noCharge: false },
+  { name: "Church giving", category: "Church giving", amount: 300, day: null, on: false, method: "momo", noCharge: false },
+  { name: "Gym", category: "Gym", amount: 200, day: 25, on: false, method: "momo", noCharge: false },
+  { name: "Streaming", category: "Streaming", amount: 70, day: 1, on: false, method: "card", noCharge: true },
+  { name: "Data bundle", category: "Data & airtime", amount: 150, day: 1, on: false, method: "momopay", noCharge: false },
 ];
 
 /** How leftover money in each bucket is first spread across variable lines. */

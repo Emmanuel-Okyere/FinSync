@@ -3,6 +3,7 @@ import { requireOnboardedUser } from "@/lib/auth/session";
 import { periodView } from "@/lib/budget";
 import { todayISO } from "@/lib/dates";
 import { entryData } from "@/lib/entry-data";
+import { feeRules } from "@/lib/fees";
 import { schemeLabel } from "@/lib/schemes";
 import { AddEntryButton, AddEntryProvider } from "@/components/app/AddEntry";
 import { Wordmark } from "@/components/Logo";
@@ -13,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const today = todayISO();
   const v = await periodView(user, today);
   const entry = await entryData(user, v);
-  const data = { cats: entry.cats, today, policies: entry.policies, inHousehold: entry.inHousehold };
+  const data = { cats: entry.cats, today, policies: entry.policies, inHousehold: entry.inHousehold, fees: feeRules(user.settings?.fees) };
 
   return (
     <div className="sk-web">

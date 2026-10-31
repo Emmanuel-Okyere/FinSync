@@ -3,10 +3,12 @@
 import { useId, useMemo, useState } from "react";
 import { ActionButton, ActionForm, FieldError, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
+import { ChargeField } from "@/components/ChargeField";
+import { DEFAULT_FEES, PAYMENT_METHODS, type FeeRules } from "@/lib/fees";
 import { addEntry, deleteEntry, updateEntry } from "@/app/(app)/_actions/transactions";
 
 export type EntryCat = { id: string; name: string; icon: string; bucket: string; bucketName: string; kind: string; planned?: number; actual?: number };
-export type EntryInit = { id: string; kind: "income" | "expense"; amount: string; categoryId: string | null; occurredOn: string; method: string; name: string; note: string | null };
+export type EntryInit = { id: string; kind: "income" | "expense"; amount: string; categoryId: string | null; occurredOn: string; method: string; name: string; note: string | null; feeMinor?: number };
 
 const tone = (b: string) => (b === "needs" ? "needs" : b === "wants" ? "wants" : b === "savings" ? "savings" : b === "income" ? "under" : "over");
 const cedi = (minor: number) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 0 }).format(Math.round(minor / 100));
@@ -20,6 +22,7 @@ export function EntryForm({
   presetCategory,
   defaultDate,
   presetKind,
+  feeRules = DEFAULT_FEES,
 }: {
   cats: EntryCat[];
   today: string;
@@ -30,6 +33,7 @@ export function EntryForm({
   /** Date to prefill (e.g. a day inside the budget cycle being viewed). */
   defaultDate?: string;
   presetKind?: "income" | "expense";
+  feeRules?: FeeRules;
 }) {
   const [kind, setKind] = useState<"income" | "expense">(initial?.kind ?? presetKind ?? "expense");
   const list = useMemo(() => cats.filter((c) => c.kind === kind), [cats, kind]);
@@ -38,6 +42,7 @@ export function EntryForm({
   const cat = list.find((c) => c.id === catId);
   const uid = useId();
   const amt = Math.round((Number(amount.replace(/[,\s]/g, "")) || 0) * 100);
+  const [method, setMethod] = useState(initial?.method ?? "momo");
 
   return (
     <>
@@ -124,15 +129,16 @@ export function EntryForm({
           </div>
           <div className="sk-field">
             <label htmlFor={`${uid}-entry-method`}>Paid with</label>
-            <select id={`${uid}-entry-method`} className="sk-input sk-input--sm" name="method" defaultValue={initial?.method ?? "momo"}>
-              <option value="momo">MoMo</option>
-              <option value="card">Card</option>
-              <option value="bank">Bank</option>
-              <option value="cash">Cash</option>
-              <option value="other">Other</option>
+            <select id={`${uid}-entry-method`} className="sk-input sk-input--sm" name="method" value={method} onChange={(e) => setMethod(e.target.value)}>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
             </select>
           </div>
         </div>
+        {kind === "expense" && cat?.name !== "Transfer charges" ? (
+          <ChargeField amount={amt} method={method} rules={feeRules} initialFee={initial ? (initial.feeMinor ?? 0) : undefined} />
+        ) : null}
         <input className="sk-input sk-input--sm" name="note" maxLength={300} defaultValue={initial?.note ?? ""} placeholder="Note (optional)" aria-label="Note" />
         {!initial && cat?.name === "Insurance" && policies.length ? (
           <div className="sk-field">

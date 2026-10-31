@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit, useServerAction } from "@/components/forms";
-import { AddToLineButton } from "@/components/app/AddEntry";
+import { ActionButton, ActionForm, Dialog, Field, Submit, useServerAction } from "@/components/forms";
+import { AddToLineButton, useFeeRules } from "@/components/app/AddEntry";
+import { ChargeField } from "@/components/ChargeField";
+import { PAYMENT_METHODS } from "@/lib/fees";
 import { markLinePaid, removeLine, reopenLine, setLinePlanned } from "@/app/(app)/_actions/budget";
 import type { LineView } from "@/lib/budget";
 
@@ -28,9 +30,20 @@ function Check({ l, defaultDate }: { l: LineView; defaultDate: string }) {
       </ActionButton>
     );
   }
-  const remaining = Math.max(0, l.planned - l.actual);
   return (
     <Dialog label={null} ariaLabel={`Mark ${l.name} paid`} title={`Mark ${l.name} paid`} triggerClassName="sk-check">
+      <MarkPaidForm l={l} defaultDate={defaultDate} />
+    </Dialog>
+  );
+}
+
+function MarkPaidForm({ l, defaultDate }: { l: LineView; defaultDate: string }) {
+  const rules = useFeeRules();
+  const remaining = Math.max(0, l.planned - l.actual);
+  const [amount, setAmount] = useState((remaining / 100).toFixed(2));
+  const [method, setMethod] = useState(l.method ?? "momo");
+  const amt = Math.round((Number(amount.replace(/[,\s]/g, "")) || 0) * 100);
+  return (
       <ActionForm action={markLinePaid} className="sk-stack">
         <input type="hidden" name="id" value={l.id} />
         <p className="sk-muted">
@@ -40,13 +53,23 @@ function Check({ l, defaultDate }: { l: LineView; defaultDate: string }) {
           Enter anything still to record, or leave it at 0 to just mark it done.
         </p>
         <div className="sk-grid g-2" style={{ gap: 10 }}>
-          <Field name="amount" label="Paid now (GH₵)" inputMode="decimal" defaultValue={(remaining / 100).toFixed(2)} />
+          <div className="sk-field">
+            <label htmlFor={`paid-${l.id}`}>Paid now (GH₵)</label>
+            <input id={`paid-${l.id}`} className="sk-input" name="amount" inputMode="decimal" value={amount} maxLength={14} onChange={(e) => setAmount(e.target.value)} />
+          </div>
           <Field name="date" label="Date" type="date" defaultValue={defaultDate} />
         </div>
-        <SelectField name="method" label="Paid with" defaultValue="momo" options={[{ value: "momo", label: "MoMo" }, { value: "bank", label: "Bank" }, { value: "card", label: "Card" }, { value: "cash", label: "Cash" }, { value: "other", label: "Other" }]} />
+        <div className="sk-field">
+          <label htmlFor={`method-${l.id}`}>Paid with</label>
+          <select id={`method-${l.id}`} className="sk-input" name="method" value={method} onChange={(e) => setMethod(e.target.value)}>
+            {PAYMENT_METHODS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+        {amt > 0 && l.name !== "Transfer charges" ? <ChargeField amount={amt} method={method} rules={rules} initialFee={l.noCharge ? 0 : undefined} /> : null}
         <Submit>Mark paid</Submit>
       </ActionForm>
-    </Dialog>
   );
 }
 

@@ -18,6 +18,8 @@ import { PageHead } from "@/components/app/PageHead";
 import { AutoSubmitToggle } from "@/components/app/AutoSubmitToggle";
 import { AppearanceSelect } from "@/components/app/AppearanceSelect";
 import { IncomeForm } from "@/components/setup/IncomeForm";
+import { FeeRulesForm } from "@/components/app/FeeRulesForm";
+import { feeRules } from "@/lib/fees";
 import { changePassword, changePhone, confirmPhoneChange, deleteAccount, requestPhoneChange, signOutEverywhere, updateProfile, updateSettings } from "../_actions/settings";
 
 export const metadata = { title: "Settings · FinSync" };
@@ -115,6 +117,13 @@ export default async function Settings() {
             <Row icon="calculator" label="Tax and SSNIT calculator" href="/tax" />
             <Row icon="sliders" label="Scheme" value={schemeLabel(user.scheme)} href="/budget#scheme" />
             <Row icon="repeat" label="Fixed expenses" href="/budget/fixed" />
+            <Dialog
+              title="Transfer charges"
+              triggerClassName="sk-tx"
+              label={<><span className="sk-tile sk-tile--sm"><Icon name="bank" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Transfer charges</span><span className="sk-cap">{s.fees ? "Your rates" : "Usual rates"}</span><Icon name="next" /></>}
+            >
+              <FeeRulesForm rules={feeRules(s.fees)} />
+            </Dialog>
             <Row icon="wallet" label="Currency" value="GH₵ (Ghana cedi)" />
             <Row icon="upload" label="Import statements" href="/import" />
             <Row icon="users" label="Household" value={household?.h.name ?? "Not set up"} href="/household" />

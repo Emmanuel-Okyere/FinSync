@@ -115,6 +115,12 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
                 <b className={v.extraIncome ? "t-income" : ""} style={v.extraIncome ? undefined : { color: "var(--ink)" }}>{v.extraIncome ? "+" : ""}GH₵ {cedis(v.extraIncome)}</b>
               </div>
               <AddEntryButton label="Add extra income" presetKind="income" className="" triggerClassName="sk-btn sk-btn--sm sk-btn--ghost" />
+              {v.charges ? (
+                <div className="sk-between sk-cap">
+                  <span>Transfer charges paid</span>
+                  <b className="t-expense">GH₵ {cedis(v.charges, 2)}</b>
+                </div>
+              ) : null}
             </div>
             <div className="sk-between sk-cap">
               <span>Left to spend or save</span>

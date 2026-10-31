@@ -14,6 +14,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 // Money is always stored in minor units (pesewas) as bigint.
@@ -42,6 +43,8 @@ export type UserSettings = {
   hideBalances: boolean;
   autoAddFixed: boolean;
   appearance: "system" | "light" | "dark";
+  /** Transfer charge rules by payment method (missing = defaults from lib/fees). */
+  fees?: Record<string, { pct: number; cap: number }>;
 };
 
 export const defaultSettings: UserSettings = {
@@ -199,6 +202,9 @@ export const fixedExpenses = pgTable(
     amountMinor: money("amount_minor").notNull(),
     dayOfMonth: integer("day_of_month"),
     active: boolean("active").notNull().default(true),
+    method: text("method").notNull().default("bank"),
+    // Subscriptions and direct debits: no transfer charge.
+    noCharge: boolean("no_charge").notNull().default(false),
     insurancePolicyId: uuid("insurance_policy_id"),
     createdAt: createdAt(),
   },
@@ -308,15 +314,18 @@ export const transactions = pgTable(
     note: text("note"),
     method: text("method").notNull().default("momo"),
     occurredOn: date("occurred_on").notNull(),
-    source: text("source").notNull().default("manual"), // manual | fixed | strike | import | adjust
+    source: text("source").notNull().default("manual"), // manual | fixed | import | fee (older: strike | adjust)
     importHash: text("import_hash"),
     // Idempotency key for system-created rows (auto-logged fixed costs, premiums).
     dedupeKey: text("dedupe_key"),
     fixedExpenseId: uuid("fixed_expense_id").references(() => fixedExpenses.id, { onDelete: "set null" }),
     insurancePolicyId: uuid("insurance_policy_id").references(() => insurancePolicies.id, { onDelete: "set null" }),
+    // A transfer charge points at the payment it belongs to; deleting the payment deletes the charge.
+    feeForId: uuid("fee_for_id").references((): AnyPgColumn => transactions.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
   (t) => [
+    index("transactions_fee_for_idx").on(t.feeForId),
     index("transactions_user_date_idx").on(t.userId, t.occurredOn),
     index("transactions_household_idx").on(t.householdId, t.occurredOn),
     index("transactions_import_hash_idx").on(t.userId, t.importHash),
@@ -401,6 +410,8 @@ export type ImportRow = {
   amountMinor: number;
   kind: "income" | "expense";
   method: string;
+  /** Transfer charge from the statement's fee column, if any. */
+  feeMinor?: number;
   categoryId: string | null;
   hash: string;
   duplicate: boolean;

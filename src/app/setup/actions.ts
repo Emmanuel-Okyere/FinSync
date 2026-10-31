@@ -10,6 +10,7 @@ import { flash } from "@/lib/flash";
 import { FormState, UserError, run } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { ensureCategories, ensurePeriod, reshapeCurrentPeriod } from "@/lib/budget";
+import { SUGGESTED_FIXED } from "@/lib/categories";
 import { fmtCycle, todayISO } from "@/lib/dates";
 import { parseMoney } from "@/lib/money";
 import { parseSchemeForm } from "@/lib/scheme-form";
@@ -108,7 +109,8 @@ export async function saveFixed(_: FormState, fd: FormData): Promise<FormState> 
       if (!name || !cat) throw new UserError("Each fixed expense needs a name and a category.");
       if (amt == null || amt <= 0) throw new UserError(`Enter an amount for ${name}.`);
       if (day != null && !(Number.isInteger(day) && day >= 1 && day <= 31)) throw new UserError(`Pick a day between 1 and 31 for ${name}.`);
-      rows.push({ userId: user.id, categoryId: cat.id, name, amountMinor: amt, dayOfMonth: day });
+      const suggested = SUGGESTED_FIXED.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      rows.push({ userId: user.id, categoryId: cat.id, name, amountMinor: amt, dayOfMonth: day, method: suggested?.method ?? "bank", noCharge: suggested?.noCharge ?? false });
     }
 
     const today = todayISO();

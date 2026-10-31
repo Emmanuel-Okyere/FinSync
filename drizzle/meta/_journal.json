@@ -36,6 +36,13 @@
       "when": 1793400393646,
       "tag": "0004_pay_cycles",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793406031387,
+      "tag": "0005_transfer_charges",
+      "breakpoints": true
     }
   ]
 }

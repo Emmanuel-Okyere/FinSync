@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import { DEFAULT_CATEGORIES, STARTER_SPLIT } from "@/lib/categories";
+import { ruleFee, syncCharge } from "@/lib/charges";
 import {
   addDays,
   cycleBounds,
@@ -222,7 +223,7 @@ async function autoLogFixed(user: SessionUser, period: Period) {
         amountMinor: f.amountMinor,
         categoryId: f.categoryId,
         name: f.name,
-        method: "bank",
+        method: f.method,
         occurredOn: d,
         source: "fixed",
         fixedExpenseId: f.id,
@@ -230,7 +231,15 @@ async function autoLogFixed(user: SessionUser, period: Period) {
       })),
     )
     .onConflictDoNothing()
-    .returning({ categoryId: transactions.categoryId });
+    .returning();
+  // Transfer charges on bills that carry them (not subscriptions / direct debits).
+  for (const tx of inserted) {
+    const f = fixed.find((x) => x.id === tx.fixedExpenseId);
+    if (f && !f.noCharge) {
+      const fee = ruleFee(user, tx.amountMinor, tx.method);
+      if (fee) await syncCharge(user.id, tx, fee);
+    }
+  }
   const catIds = inserted.map((r) => r.categoryId!).filter(Boolean);
   if (catIds.length) {
     await db
@@ -333,6 +342,9 @@ export type LineView = {
   actual: number;
   done: boolean;
   fixed: boolean;
+  /** How the linked fixed bill is usually paid, for the "Mark paid" charge. */
+  method: string | null;
+  noCharge: boolean;
   entries: number;
 };
 
@@ -360,9 +372,12 @@ export async function getPeriodView(user: SessionUser, date: string) {
         name: categories.name,
         icon: categories.icon,
         catBucket: categories.bucket,
+        method: fixedExpenses.method,
+        noCharge: fixedExpenses.noCharge,
       })
       .from(budgetLines)
       .innerJoin(categories, eq(categories.id, budgetLines.categoryId))
+      .leftJoin(fixedExpenses, eq(fixedExpenses.id, budgetLines.fixedExpenseId))
       .where(eq(budgetLines.monthId, m.id)),
     db
       .select({
@@ -370,6 +385,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
         total: sql<string>`sum(${transactions.amountMinor})`,
         n: sql<string>`count(*)`,
         catBucket: categories.bucket,
+        catName: categories.name,
       })
       .from(transactions)
       .leftJoin(categories, eq(categories.id, transactions.categoryId))
@@ -381,7 +397,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
           lte(transactions.occurredOn, end),
         ),
       )
-      .groupBy(transactions.categoryId, categories.bucket),
+      .groupBy(transactions.categoryId, categories.bucket, categories.name),
     // Extra income received in this cycle (anything except regular salary, which "I've been paid" records).
     db
       .select({ total: sql<string>`coalesce(sum(${transactions.amountMinor}), 0)` })
@@ -399,6 +415,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
   ]);
 
   const extraIncome = Number(incomeRows[0]?.total ?? 0);
+  const charges = sums.filter((s) => s.catName === "Transfer charges").reduce((a, s) => a + Number(s.total), 0);
   const actualByCat = new Map(sums.map((s) => [s.categoryId ?? "none", { total: Number(s.total), n: Number(s.n), catBucket: s.catBucket }]));
   const scheme = m.scheme;
 
@@ -414,6 +431,8 @@ export async function getPeriodView(user: SessionUser, date: string) {
       entries: actualByCat.get(l.categoryId)?.n ?? 0,
       done: l.done,
       fixed: Boolean(l.fixedExpenseId),
+      method: l.method,
+      noCharge: l.noCharge ?? false,
     }))
     .sort((a, b) => scheme.buckets.findIndex((x) => x.key === a.bucket) - scheme.buckets.findIndex((x) => x.key === b.bucket) || b.planned - a.planned);
 
@@ -458,6 +477,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
     buckets,
     income: m.incomeMinor,
     extraIncome,
+    charges,
     isCurrent,
     day,
     days,

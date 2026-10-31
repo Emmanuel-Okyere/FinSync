@@ -97,3 +97,14 @@ Run `npm test` for the payday and cycle checks.
 - **Lines work like categories.** A line's Actual is the total of the expenses logged under it in the cycle; "+" on a line logs spending straight into it. Planned can change any time. Ticking a line ("Mark paid") optionally records a real payment for what's still due; unticking never deletes entries.
 - **Regular pay** (non-varying incomes) is what a cycle is planned from, and "I've been paid" records what actually arrived.
 - **Income that varies** (side work, commission, irregular allowances) isn't counted in advance. When it's logged as income (any category except Salary), the cycle's bucket targets grow by it, split by the scheme, so safe-to-spend rises immediately.
+
+## Transfer charges
+
+Payments can carry a transfer charge, recorded as its own expense in the **Transfer charges** category and linked to the payment (`transactions.fee_for_id`, deleted with it). Lists show it on the payment's row ("+0.34 charge"); budgets, reports and exports count it.
+
+- **Rules** (Settings → Transfer charges, stored in `users.settings.fees`): a percentage and optional cap per payment method. Defaults in `src/lib/fees.ts` follow Ghana rates as of 2026: MoMo send 0.75% up to GH₵ 7.50; MoMoPay/bills, GhanaPay and card free; bank transfer 1% up to GH₵ 20 (banks vary). E-Levy was abolished in April 2025. Cash is never charged.
+- **Entries**: the form works the charge out as you type; it can be unticked or overridden per entry. "Mark paid" on a budget line does the same, starting from the fixed bill's usual method.
+- **Fixed bills** have a usual method and a "No transfer charge" switch (subscriptions, direct debits); auto-logged bills add the rule's charge unless switched off.
+- **Statement imports** read a Fees / Charges / E-Levy column when present and record it as the linked charge.
+
+`npm run test:fees` checks the rules and the statement fee column.

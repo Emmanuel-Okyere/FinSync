@@ -61,6 +61,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
               Saved {savePct.toFixed(1)}% · {savePct >= target ? "scheme target met" : `target ${target}%`}
             </div>
             <div className="sk-cap">In = planned pay (GH₵ {cedis(v.income)}) plus extra income you logged.</div>
+            {v.charges ? <div className="sk-cap">Transfer charges: GH₵ {cedis(v.charges, 2)} of what went out.</div> : null}
           </div>
           <div className="sk-card sk-card--pad sk-stack">
             <b>Biggest categories</b>

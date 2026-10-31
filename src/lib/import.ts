@@ -76,7 +76,7 @@ function find(headers: string[], ...needles: RegExp[]) {
   return -1;
 }
 
-export type ParsedRow = { occurredOn: string; name: string; amountMinor: number; kind: "income" | "expense"; method: string };
+export type ParsedRow = { occurredOn: string; name: string; amountMinor: number; kind: "income" | "expense"; method: string; feeMinor?: number };
 
 /** Maps common Ghana bank / MoMo statement layouts to rows. */
 export function extractRows(rows: string[][], source: "momo" | "bank"): { rows: ParsedRow[]; error?: string } {
@@ -89,6 +89,8 @@ export function extractRows(rows: string[][], source: "momo" | "bank"): { rows: 
   const iCredit = find(h, /^credit$|^credit\b(?!\/)|credit amount|deposit|money in|paid in/);
   const iAmount = find(h, /^amount/, /trans.*amount/, /amount/);
   const iType = find(h, /dr\/cr|cr\/dr|debit\/credit/, /trans.*type/, /^type/);
+  // MoMo statements list the transfer charge (and any levy) in their own columns.
+  const iFees = h.map((x, i) => (/^(fees?|charges?|e-?levy|levy)\b|fee amount|trans.*fee/.test(x) ? i : -1)).filter((i) => i >= 0);
   const out: ParsedRow[] = [];
   for (const r of rows.slice(headerIdx + 1)) {
     const date = parseDate(r[iDate] ?? "");
@@ -111,7 +113,8 @@ export function extractRows(rows: string[][], source: "momo" | "bank"): { rows: 
     }
     if (!amt) continue;
     const name = (r[iDesc] ?? "").replace(/\s+/g, " ").slice(0, 80) || (amt < 0 ? "Payment" : "Money in");
-    out.push({ occurredOn: date, name, amountMinor: Math.abs(amt), kind: amt < 0 ? "expense" : "income", method: source === "momo" ? "momo" : "bank" });
+    const fee = amt < 0 ? iFees.reduce((s, i) => s + Math.abs(money(r[i] ?? "") ?? 0), 0) : 0;
+    out.push({ occurredOn: date, name, amountMinor: Math.abs(amt), kind: amt < 0 ? "expense" : "income", method: source === "momo" ? "momo" : "bank", ...(fee > 0 && fee < Math.abs(amt) ? { feeMinor: fee } : {}) });
     if (out.length >= 2000) break;
   }
   if (!out.length) return { rows: [], error: "No entries with a date and amount were found." };

@@ -15,6 +15,8 @@ import { enforce } from "@/lib/rate-limit";
 import { otpEnabled } from "@/lib/env";
 import { flash } from "@/lib/flash";
 import { phoneAllowedForSms } from "@/lib/sms/giant";
+import { CHARGEABLE_METHODS, METHOD_LABEL, type FeeRule } from "@/lib/fees";
+import { parseMoney } from "@/lib/money";
 
 export async function updateProfile(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
@@ -53,6 +55,28 @@ export async function updateSettings(_: FormState, fd: FormData): Promise<FormSt
     if (appearance === "system" || appearance === "light" || appearance === "dark") next.appearance = appearance;
     await db.update(users).set({ settings: next, updatedAt: new Date() }).where(eq(users.id, user.id));
     return "Settings saved";
+  });
+}
+
+/** Transfer-charge rules per payment method: a percentage and an optional cap in cedis. */
+export async function saveFeeRules(_: FormState, fd: FormData): Promise<FormState> {
+  return run(async () => {
+    const user = await actionUser();
+    const fees: Record<string, FeeRule> = {};
+    for (const m of CHARGEABLE_METHODS) {
+      const label = METHOD_LABEL[m] ?? m;
+      const pctRaw = String(fd.get(`${m}.pct`) ?? "").trim();
+      const capRaw = String(fd.get(`${m}.cap`) ?? "").trim();
+      const pct = pctRaw ? Number(pctRaw) : 0;
+      if (!Number.isFinite(pct) || pct < 0 || pct > 10) throw new UserError(`${label}: enter a percentage between 0 and 10.`);
+      const cap = capRaw ? parseMoney(capRaw) : 0;
+      if (cap == null || cap < 0 || cap > 100000) throw new UserError(`${label}: enter a cap like 7.50, or leave it blank for none.`);
+      fees[m] = { pct: Math.round(pct * 100) / 100, cap };
+    }
+    const reset = fd.get("reset") === "1";
+    const next: UserSettings = { ...user.settings, fees: reset ? undefined : fees };
+    await db.update(users).set({ settings: next, updatedAt: new Date() }).where(eq(users.id, user.id));
+    return reset ? "Charges reset to the usual rates" : "Transfer charges saved";
   });
 }
 

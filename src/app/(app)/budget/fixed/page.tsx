@@ -10,6 +10,7 @@ import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit } from "@/
 import { Icon } from "@/components/Icon";
 import { PageHead } from "@/components/app/PageHead";
 import { Amount, Empty } from "@/components/app/ui";
+import { METHOD_LABEL, PAYMENT_METHODS } from "@/lib/fees";
 import { AutoSubmitToggle } from "@/components/app/AutoSubmitToggle";
 import { deleteFixedExpense, saveFixedExpense, setAutoAddFixed, toggleFixedExpense } from "../../_actions/budget";
 
@@ -51,6 +52,14 @@ export default async function Fixed() {
         <Field name="amount" label="Each month (GH₵)" inputMode="decimal" required defaultValue={f ? toInputValue(f.amountMinor) : ""} />
         <Field name="day" label="Day of month" type="number" min={1} max={31} defaultValue={f?.dayOfMonth ?? ""} hint="Leave blank if it varies" />
       </div>
+      <SelectField name="method" label="Usually paid with" options={PAYMENT_METHODS.map((m) => ({ value: m.value, label: m.label }))} defaultValue={f?.method ?? "bank"} />
+      <label className="sk-between" style={{ cursor: "pointer" }}>
+        <div>
+          <b>No transfer charge</b>
+          <div className="sk-cap">For subscriptions and direct debits that don&apos;t cost extra</div>
+        </div>
+        <input type="checkbox" className="sk-toggle" name="noCharge" defaultChecked={f?.noCharge ?? false} />
+      </label>
       <Submit>{f ? "Save changes" : "Add fixed expense"}</Submit>
     </ActionForm>
   );
@@ -73,7 +82,7 @@ export default async function Fixed() {
                   <div className={`sk-tile sk-tile--${bucket === "wants" ? "wants" : bucket === "savings" ? "savings" : "needs"}`}><Icon name={icon} /></div>
                   <div className="sk-tx__main">
                     <div className="sk-tx__name">{f.name}</div>
-                    <div className="sk-cap">{f.dayOfMonth ? ord(f.dayOfMonth) : "Varies"} · {catName}</div>
+                    <div className="sk-cap">{f.dayOfMonth ? ord(f.dayOfMonth) : "Varies"} · {catName} · {METHOD_LABEL[f.method] ?? f.method}{f.noCharge ? ", no charge" : ""}</div>
                   </div>
                   <div className="right">
                     <div className="sk-tx__amt">{cedis(f.amountMinor)}</div>
