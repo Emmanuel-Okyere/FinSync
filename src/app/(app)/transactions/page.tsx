@@ -1,3 +1,4 @@
+import { METHOD_LABEL } from "@/lib/fees";
 import Link from "next/link";
 import { requireOnboardedUser } from "@/lib/auth/session";
 import { parseDateParam, relDay } from "@/lib/dates";
@@ -111,7 +112,7 @@ export default async function Transactions({ searchParams }: { searchParams: Pro
                   <span className="sk-cap">{[inn ? `+${cedis(inn, 2)}` : "", out ? `−${cedis(out, 2)}` : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 {txs.map((t) => (
-                  <Tx key={t.id} t={t} highlight={q || undefined} meta={`${{ momo: "MoMo", card: "Card", bank: "Bank", cash: "Cash", other: "Other" }[t.method] ?? t.method} · ${t.catName ?? "Uncategorised"}`} />
+                  <Tx key={t.id} t={t} highlight={q || undefined} meta={`${t.accountName ?? METHOD_LABEL[t.method] ?? t.method} · ${t.catName ?? "Uncategorised"}`} />
                 ))}
               </section>
             );

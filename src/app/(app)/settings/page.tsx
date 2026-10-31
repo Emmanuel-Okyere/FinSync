@@ -20,7 +20,7 @@ import { AppearanceSelect } from "@/components/app/AppearanceSelect";
 import { IncomeForm } from "@/components/setup/IncomeForm";
 import { FeeRulesForm } from "@/components/app/FeeRulesForm";
 import { feeRules } from "@/lib/fees";
-import { changePassword, changePhone, confirmPhoneChange, deleteAccount, requestPhoneChange, signOutEverywhere, updateProfile, updateSettings } from "../_actions/settings";
+import { changePassword, changePhone, confirmPhoneVerify, requestPhoneVerify, confirmPhoneChange, deleteAccount, requestPhoneChange, signOutEverywhere, updateProfile, updateSettings } from "../_actions/settings";
 
 export const metadata = { title: "Settings · FinSync" };
 
@@ -94,7 +94,7 @@ export default async function Settings() {
             <Dialog
               title="Income and payday"
               triggerClassName="sk-tx"
-              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ fontWeight: 600 }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}{user.budgetCycle === "payday" ? " · budget starts on payday" : ""}</span><Icon name="next" /></>}
+              label={<><span className="sk-tile sk-tile--sm"><Icon name="calendar" /></span><span className="sk-tx__main" style={{ textAlign: "left" }}><span style={{ fontWeight: 600, display: "block" }}>Income and payday</span><span className="sk-cap">{paydayLabel[user.paydayRule] ?? user.paydayRule}{user.budgetCycle === "payday" ? " · budget starts on payday" : ""}</span></span><Icon name="next" /></>}
             >
               <IncomeForm
                 action={saveIncome}
@@ -138,6 +138,23 @@ export default async function Settings() {
 
         <div className="sk-stack" style={{ gap: 16 }}>
           <div className="sk-over">Alerts by SMS</div>
+          {!user.phoneVerifiedAt && (s.overBudgetAlerts || s.billReminders || s.dailySafeToSpend) ? (
+            <div className="sk-card sk-card--pad sk-stack" style={{ gap: 10, borderColor: "var(--accent)" }}>
+              <div>
+                <b>SMS alerts are paused</b>
+                <div className="sk-cap">
+                  {displayPhone(user.phone)} hasn&apos;t been verified, so alerts aren&apos;t sent to it. Verify it once with a code and they start the next morning at 8am.
+                </div>
+              </div>
+              <ActionForm action={requestPhoneVerify} keepOpen>
+                <Submit className="sk-btn sk-btn--sm sk-btn--ghost">Text me a code</Submit>
+              </ActionForm>
+              <ActionForm action={confirmPhoneVerify} className="sk-row sk-wrap" style={{ gap: 10, alignItems: "flex-end" }}>
+                <Field name="code" label="6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required />
+                <Submit className="sk-btn sk-btn--sm">Verify</Submit>
+              </ActionForm>
+            </div>
+          ) : null}
           <ActionForm action={updateSettings} className="sk-card sk-card--pad">
             {([
               ["overBudgetAlerts", "bell", "Over-budget warnings", s.overBudgetAlerts],

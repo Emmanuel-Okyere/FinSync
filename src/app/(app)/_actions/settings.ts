@@ -153,6 +153,37 @@ export async function confirmPhoneChange(_: FormState, fd: FormData): Promise<Fo
   });
 }
 
+/**
+ * SMS alerts only go to numbers proven by a code (so nobody can point alerts at someone else's phone).
+ * This works even while sign-in codes are off (OTP_ENABLED=false): it verifies the number on the account.
+ */
+export async function requestPhoneVerify(): Promise<FormState> {
+  return run(
+    async () => {
+      const user = await actionUser();
+      if (!user.phone) throw new UserError("Add a phone number first.");
+      if (user.phoneVerifiedAt) return "Your number is already verified";
+      if (!phoneAllowedForSms(user.phone)) throw new UserError("Only Ghana numbers are supported right now.");
+      await enforce(`phoneverify:${user.id}`, 5, 60 * 60);
+      const { ip } = await clientMeta();
+      await sendOtp(user.phone, "verify_phone", ip);
+      return "Code sent by SMS";
+    },
+    { refresh: false },
+  );
+}
+
+export async function confirmPhoneVerify(_: FormState, fd: FormData): Promise<FormState> {
+  return run(async () => {
+    const user = await actionUser();
+    if (!user.phone) throw new UserError("Add a phone number first.");
+    await enforce(`phoneverify:confirm:${user.id}`, 10, 15 * 60);
+    if (!(await verifyOtp(user.phone, "verify_phone", String(fd.get("code") ?? "").trim()))) throw new UserError("That code is wrong or has expired.", "code");
+    await db.update(users).set({ phoneVerifiedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, user.id));
+    return "Number verified. SMS alerts are on.";
+  });
+}
+
 export async function signOutEverywhere() {
   const user = await actionUser();
   await db.update(users).set({ sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, user.id));

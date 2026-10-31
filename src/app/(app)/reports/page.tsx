@@ -203,7 +203,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
                   <td>{t.occurredOn.slice(8)} {new Date(`${t.occurredOn}T00:00:00Z`).toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}</td>
                   <td>{t.name}</td>
                   <td className="hide-mobile">{t.catName ?? "—"}</td>
-                  <td className="hide-mobile">{METHOD_LABEL[t.method] ?? t.method}</td>
+                  <td className="hide-mobile">{("accountName" in t && t.accountName) || (METHOD_LABEL[t.method] ?? t.method)}</td>
                   <td className={`r ${t.kind === "income" ? "t-income" : ""}`}>{t.kind === "income" ? "+" : "−"}{cedis(t.amountMinor, 2)}</td>
                 </tr>
               ))}
