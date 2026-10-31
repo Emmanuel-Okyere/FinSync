@@ -36,6 +36,13 @@ function AccountForm({ a }: { a?: typeof savingsAccounts.$inferSelect }) {
         <Field name="expectedReturn" label="Interest due (optional)" inputMode="decimal" defaultValue={toInputValue(a?.expectedReturnMinor)} />
       </div>
       <Field name="note" label="Note (optional)" defaultValue={a?.note ?? ""} placeholder="e.g. GH₵ 125 weekly · payout Dec" maxLength={120} />
+      <label className="sk-between" style={{ cursor: "pointer" }}>
+        <div>
+          <b>Locked until I close it</b>
+          <div className="sk-cap">Like a bank&apos;s lifestyle savings: it grows, but taking money out is blocked here</div>
+        </div>
+        <input type="checkbox" className="sk-toggle" name="locked" defaultChecked={a?.locked ?? false} />
+      </label>
       <Submit>{a ? "Save changes" : "Add"}</Submit>
     </ActionForm>
   );
@@ -73,7 +80,7 @@ export default async function Savings() {
                   <div className="sk-row" style={{ gap: 12 }}>
                     <div className="sk-tile sk-tile--savings"><Icon name={a.kind === "wallet" ? "phone" : a.kind === "tbill" ? "bank" : a.kind === "susu" ? "users" : "wallet"} /></div>
                     <div className="sk-tx__main">
-                      <div className="sk-tx__name">{a.name}</div>
+                      <div className="sk-tx__name">{a.name}{a.locked ? <span className="sk-tag sk-tag--pace" style={{ marginLeft: 6 }}><Icon name="lock" />Locked</span> : null}</div>
                       <div className="sk-cap">{a.maturesOn ? `Matures ${fmtShort(a.maturesOn)}` : (a.note ?? kindLabel(a.kind))}</div>
                     </div>
                     <div className="right">
@@ -85,7 +92,7 @@ export default async function Savings() {
                         <input type="hidden" name="id" value={a.id} />
                         <div className="sk-seg" role="radiogroup" aria-label="Direction">
                           <label><input type="radio" name="direction" value="in" defaultChecked />Put in</label>
-                          <label><input type="radio" name="direction" value="out" />Take out</label>
+                          {a.locked ? null : <label><input type="radio" name="direction" value="out" />Take out</label>}
                         </div>
                         <Field name="amount" label="Amount (GH₵)" inputMode="decimal" required />
                         <label className="sk-between" style={{ cursor: "pointer" }}>

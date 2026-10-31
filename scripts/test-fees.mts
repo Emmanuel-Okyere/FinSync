@@ -27,5 +27,17 @@ const { extractRows, parseCsv } = await import("../src/lib/import.ts");
 const st = extractRows(parseCsv("Transaction Date,Description,Amount,Fees,E-Levy\n2026-10-02,Kofi Mensah,-450.00,3.38,0\n2026-10-03,Salary,5000.00,0,0\n"), "momo").rows;
 eq("statement fee on a send", st[0]?.feeMinor ?? 0, 338);
 eq("no fee on money in", st[1]?.feeMinor ?? 0, 0);
+// Automatic savings in a bank statement: linked to the payment next to them, never to loan repayments.
+const { markAutoSaves } = await import("../src/lib/import.ts");
+const same = (name: string, got: string, want: string) => {
+  if (got !== want) fails++;
+  console.log(`${got === want ? "PASS" : "FAIL"} ${name}: ${got} (want ${want})`);
+};
+const ex = (rows: { name: string; amountMinor: number; categoryId?: string }[]) =>
+  markAutoSaves(rows.map((r) => ({ ...r, kind: "expense", occurredOn: "2026-10-02" })), 10000, ["debt"]).map((r) => r.saveFor ?? -1).join(",");
+same("saving after a payment", ex([{ name: "POS Shoprite", amountMinor: 45000 }, { name: "TRF", amountMinor: 10000 }]), "-1,0");
+same("saving before a payment (newest first)", ex([{ name: "Lifestyle savings", amountMinor: 15000 }, { name: "POS Shoprite", amountMinor: 45000 }]), "1,-1");
+same("no saving on loan repayment", ex([{ name: "Loan repay", amountMinor: 80000, categoryId: "debt" }, { name: "TRF", amountMinor: 10000 }]), "-1,-1");
+same("two payments, two savings", ex([{ name: "A", amountMinor: 5000 }, { name: "Auto save", amountMinor: 10000 }, { name: "B", amountMinor: 7000 }, { name: "Auto save", amountMinor: 10000 }]), "-1,0,-1,2");
 console.log(fails ? `${fails} FAILED` : "ALL PASS");
 if (fails) process.exit(1);

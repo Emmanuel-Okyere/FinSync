@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const today = todayISO();
   const v = await periodView(user, today);
   const entry = await entryData(user, v);
-  const data = { cats: entry.cats, today, policies: entry.policies, inHousehold: entry.inHousehold, fees: feeRules(user.settings?.fees) };
+  const data = { cats: entry.cats, today, policies: entry.policies, inHousehold: entry.inHousehold, fees: feeRules(user.settings?.fees), accounts: entry.accounts, saveMemory: entry.saveMemory };
 
   return (
     <div className="sk-web">

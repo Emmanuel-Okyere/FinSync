@@ -24,7 +24,7 @@ export function ruleFee(user: SessionUser, amount: number, method: string) {
  */
 export async function syncCharge(
   userId: string,
-  parent: { id: string; name: string; method: string; occurredOn: string; householdId?: string | null },
+  parent: { id: string; name: string; method: string; occurredOn: string; householdId?: string | null; accountId?: string | null },
   fee: number,
 ) {
   const [existing] = await db.select({ id: transactions.id }).from(transactions).where(and(eq(transactions.feeForId, parent.id), eq(transactions.userId, userId)));
@@ -38,6 +38,7 @@ export async function syncCharge(
     method: parent.method,
     occurredOn: parent.occurredOn,
     householdId: parent.householdId ?? null,
+    accountId: parent.accountId ?? null,
   };
   if (existing) {
     await db.update(transactions).set(values).where(eq(transactions.id, existing.id));

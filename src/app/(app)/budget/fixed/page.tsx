@@ -4,13 +4,15 @@ import { categories, fixedExpenses, transactions } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
 import { ensurePeriod } from "@/lib/budget";
 import { incomeTotal } from "@/lib/budget";
-import { dayOf, todayISO } from "@/lib/dates";
+import { addDays, dayOf, fmtShort, todayISO } from "@/lib/dates";
 import { cedis, toInputValue } from "@/lib/money";
 import { ActionButton, ActionForm, Dialog, Field, SelectField, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { PageHead } from "@/components/app/PageHead";
 import { Amount, Empty } from "@/components/app/ui";
 import { METHOD_LABEL, PAYMENT_METHODS } from "@/lib/fees";
+import { billSuggestions } from "@/lib/plans";
+import { userAccounts } from "@/lib/accounts";
 import { AutoSubmitToggle } from "@/components/app/AutoSubmitToggle";
 import { deleteFixedExpense, saveFixedExpense, setAutoAddFixed, toggleFixedExpense } from "../../_actions/budget";
 
@@ -23,7 +25,7 @@ export default async function Fixed() {
   const today = todayISO();
   const cycle = await ensurePeriod(user, today);
   const month = cycle.start;
-  const [rows, cats, logged, income] = await Promise.all([
+  const [rows, cats, logged, income, accts] = await Promise.all([
     db
       .select({ f: fixedExpenses, catName: categories.name, icon: categories.icon, bucket: categories.bucket })
       .from(fixedExpenses)
@@ -36,8 +38,12 @@ export default async function Fixed() {
       .from(transactions)
       .where(and(eq(transactions.userId, user.id), isNotNull(transactions.fixedExpenseId), gte(transactions.occurredOn, month), lte(transactions.occurredOn, cycle.end))),
     incomeTotal(user.id),
+    userAccounts(user.id),
   ]);
+  const acctName = new Map(accts.map((a) => [a.id, a.name]));
+  const payOptions = [...accts.map((a) => ({ value: `a:${a.id}`, label: a.name })), ...PAYMENT_METHODS.map((m) => ({ value: `m:${m.value}`, label: m.label }))];
   const loggedIds = new Set(logged.map((l) => l.id));
+  const suggestions = await billSuggestions(user.id, rows.map((r) => r.f), addDays(today, 1));
   const active = rows.filter((r) => r.f.active);
   const total = active.reduce((s, r) => s + r.f.amountMinor, 0);
   const byBucket = (b: string) => active.filter((r) => r.bucket === b).reduce((s, r) => s + r.f.amountMinor, 0);
@@ -49,10 +55,17 @@ export default async function Fixed() {
       <Field name="name" label="Name" required defaultValue={f?.name} maxLength={60} placeholder="e.g. Rent" />
       <SelectField name="categoryId" label="Category" options={catOptions} defaultValue={f?.categoryId} />
       <div className="sk-grid g-2" style={{ gap: 10 }}>
-        <Field name="amount" label="Each month (GH₵)" inputMode="decimal" required defaultValue={f ? toInputValue(f.amountMinor) : ""} />
+        <Field name="amount" label={f?.varies ? "Usually (GH₵)" : "Each month (GH₵)"} inputMode="decimal" required defaultValue={f ? toInputValue(f.amountMinor) : ""} />
         <Field name="day" label="Day of month" type="number" min={1} max={31} defaultValue={f?.dayOfMonth ?? ""} hint="Leave blank if it varies" />
       </div>
-      <SelectField name="method" label="Usually paid with" options={PAYMENT_METHODS.map((m) => ({ value: m.value, label: m.label }))} defaultValue={f?.method ?? "bank"} />
+      <SelectField name="paidWith" label="Usually paid with" options={payOptions} defaultValue={f?.accountId && acctName.has(f.accountId) ? `a:${f.accountId}` : `m:${f?.method ?? "bank"}`} />
+      <label className="sk-between" style={{ cursor: "pointer" }}>
+        <div>
+          <b>Amount changes each month</b>
+          <div className="sk-cap">Electricity, water, fuel: planned from the average of your last 3 payments, and not logged automatically</div>
+        </div>
+        <input type="checkbox" className="sk-toggle" name="varies" defaultChecked={f?.varies ?? false} />
+      </label>
       <label className="sk-between" style={{ cursor: "pointer" }}>
         <div>
           <b>No transfer charge</b>
@@ -76,16 +89,24 @@ export default async function Fixed() {
           {rows.length ? (
             rows.map(({ f, catName, icon, bucket }) => {
               const isLogged = loggedIds.has(f.id);
+              const sug = suggestions.get(f.id);
               const due = f.dayOfMonth && f.dayOfMonth > dayOf(today);
               return (
                 <div key={f.id} className="sk-tx" style={{ opacity: f.active ? 1 : 0.55 }}>
                   <div className={`sk-tile sk-tile--${bucket === "wants" ? "wants" : bucket === "savings" ? "savings" : "needs"}`}><Icon name={icon} /></div>
                   <div className="sk-tx__main">
                     <div className="sk-tx__name">{f.name}</div>
-                    <div className="sk-cap">{f.dayOfMonth ? ord(f.dayOfMonth) : "Varies"} · {catName} · {METHOD_LABEL[f.method] ?? f.method}{f.noCharge ? ", no charge" : ""}</div>
+                    <div className="sk-cap">{f.dayOfMonth ? ord(f.dayOfMonth) : "Any day"} · {catName} · {(f.accountId && acctName.get(f.accountId)) || (METHOD_LABEL[f.method] ?? f.method)}{f.noCharge ? ", no charge" : ""}</div>
+                    {f.varies ? (
+                      <div className="sk-cap">
+                        {sug
+                          ? <>Changes · next plan <b style={{ color: "var(--ink)" }}>{cedis(sug.suggested)}</b>, average of your last {sug.recent.length === 1 ? "payment" : `${sug.recent.length} payments`} ({sug.recent.map((r) => `${fmtShort(r.on)}: ${cedis(r.amount)}`).join(", ")})</>
+                          : "Changes · planned at the usual amount until you've paid it"}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="right">
-                    <div className="sk-tx__amt">{cedis(f.amountMinor)}</div>
+                    <div className="sk-tx__amt">{cedis(f.varies && sug ? sug.suggested : f.amountMinor)}</div>
                     {!f.active ? <span className="sk-tag sk-tag--pace">Paused</span> : isLogged ? <span className="sk-tag sk-tag--under"><Icon name="check" />Logged</span> : due ? <span className="sk-tag sk-tag--pace">Due {ord(f.dayOfMonth!)}</span> : <span className="sk-tag sk-tag--needs">Not logged</span>}
                   </div>
                   <Dialog label={<Icon name="edit" />} ariaLabel={`Edit ${f.name}`} title={`Edit ${f.name}`} triggerClassName="sk-iconbtn">

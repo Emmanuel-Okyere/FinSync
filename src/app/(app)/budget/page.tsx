@@ -23,7 +23,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
   const { start, end, label, id: periodId } = v.period;
   const filter = v.scheme.buckets.some((b) => b.key === sp.b) ? sp.b! : "all";
   const lines = filter === "all" ? v.lines : v.lines.filter((l) => l.bucket === filter);
-  const sel = filter === "all" ? { planned: v.totalPlanned, actual: v.totalActual, target: v.income } : (() => {
+  const sel = filter === "all" ? { planned: v.totalPlanned, actual: v.totalActual, target: v.income + v.extraIncome + v.carried } : (() => {
     const b = v.buckets.find((x) => x.key === filter)!;
     return { planned: b.target, actual: b.actual, target: b.target };
   })();
@@ -34,7 +34,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
     <>
       <PageHead
         title={user.budgetCycle === "payday" ? "Budget" : `${label} budget`}
-        sub={`${v.period.paidOn ? `Paid ${fmtShort(v.period.paidOn)} · ` : ""}${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income + v.extraIncome)} · ${v.doneCount} of ${v.lines.length} lines paid`}
+        sub={`${v.period.paidOn ? `Paid ${fmtShort(v.period.paidOn)} · ` : ""}${schemeLabel(v.scheme)} · GH₵ ${cedis(v.income + v.extraIncome + v.carried)} · ${v.doneCount} of ${v.lines.length} lines paid`}
       >
         <PeriodSwitch start={start} end={end} label={label} base="/budget" extra={filter !== "all" ? `&b=${filter}` : ""} />
       </PageHead>
@@ -47,6 +47,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
           ))}
         </nav>
         <Link className="sk-link" href="/budget/fixed">Fixed expenses →</Link>
+        <Link className="sk-link" href="/budget/set-asides">Set-asides →</Link>
       </div>
 
       <div className="sk-grid g-main">
@@ -114,6 +115,12 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
                 <span>Extra income received</span>
                 <b className={v.extraIncome ? "t-income" : ""} style={v.extraIncome ? undefined : { color: "var(--ink)" }}>{v.extraIncome ? "+" : ""}GH₵ {cedis(v.extraIncome)}</b>
               </div>
+              {v.carried ? (
+                <div className="sk-between sk-cap">
+                  <span>Kept from last cycle</span>
+                  <b className="t-income">+GH₵ {cedis(v.carried)}</b>
+                </div>
+              ) : null}
               <AddEntryButton label="Add extra income" presetKind="income" className="" triggerClassName="sk-btn sk-btn--sm sk-btn--ghost" />
               {v.charges ? (
                 <div className="sk-between sk-cap">
@@ -124,7 +131,7 @@ export default async function Budget({ searchParams }: { searchParams: Promise<{
             </div>
             <div className="sk-between sk-cap">
               <span>Left to spend or save</span>
-              <Amount minor={v.income - v.totalActual} style={{ fontSize: 18 }} />
+              <Amount minor={v.income + v.extraIncome + v.carried - v.totalActual} style={{ fontSize: 18 }} />
             </div>
           </div>
         </div>

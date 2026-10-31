@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { incomes, savingsAccounts } from "@/db/schema";
+import { categories, incomes, savingsAccounts, setAsides } from "@/db/schema";
 import { requireOnboardedUser } from "@/lib/auth/session";
-import { cutSuggestions, cycleConfig, paceOf, periodView } from "@/lib/budget";
+import { cutSuggestions, cycleConfig, paceOf, pendingReview, periodView } from "@/lib/budget";
+import { LeftoverReview } from "@/components/app/LeftoverReview";
 import { addDays, cycleEndFrom, dayOf, diffDays, fmtCycle, fmtShort, fmtWeekday, todayISO } from "@/lib/dates";
 import { cedis } from "@/lib/money";
 import { dailySpend, listTransactions } from "@/lib/queries";
@@ -32,6 +33,15 @@ export default async function Home() {
     dailySpend(user.id, start, end),
   ]);
   const cuts = cutSuggestions(v);
+  // Payday check-in for the cycle that just ended.
+  const review = await pendingReview(user, v.period);
+  const [reviewCats, reviewPots] = review
+    ? await Promise.all([
+        db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.userId, user.id), eq(categories.kind, "expense"), eq(categories.bucket, "savings"), eq(categories.archived, false))),
+        db.select({ name: setAsides.name, categoryId: setAsides.categoryId }).from(setAsides).where(and(eq(setAsides.userId, user.id), eq(setAsides.active, true))),
+      ])
+    : [[], []];
+  const potCats = new Set(reviewPots.map((p) => p.categoryId));
   const savedTotal = accounts.reduce((s, a) => s + a.balanceMinor, 0);
   // Four spans across the cycle (the last one takes the remainder), labelled by their dates.
   const spans = [[0, 6], [7, 13], [14, 20], [21, v.days - 1]].filter(([a, b]) => a <= b);
@@ -75,6 +85,18 @@ export default async function Home() {
         <PageHead title="Overview" sub={`${fmtWeekday(today)} · ${payday ? `${v.period.label} · ` : ""}payday in ${v.daysLeft} day${v.daysLeft === 1 ? "" : "s"}`} />
       </div>
 
+      {review ? (
+        <LeftoverReview
+          key={`${review.period.id}:${review.leftover}`}
+          periodId={review.period.id}
+          label={review.period.label}
+          leftover={review.leftover}
+          savings={reviewCats.filter((c) => !potCats.has(c.id)).map((c) => ({ value: `cat:${c.id}`, label: `Save: ${c.name}`, hint: `Counted as saved in ${review.period.label}.` }))}
+          pots={reviewPots.map((p) => ({ value: `cat:${p.categoryId}`, label: `Towards ${p.name}`, hint: `Tops up what's set aside for ${p.name}, so later cycles need less.` }))}
+          accounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
+        />
+      ) : null}
+
       <div className="sk-grid g-kpi">
         <div className="sk-hero sk-stack" style={{ gap: 6 }}>
           <div className="sk-hero__deco" />
@@ -111,10 +133,11 @@ export default async function Home() {
         </div>
         <div className="sk-kpi hide-mobile">
           <div className="sk-over">Income</div>
-          <Amount minor={v.income + v.extraIncome} className="t-income" />
+          <Amount minor={v.income + v.extraIncome + v.carried} className="t-income" />
           <div className="sk-cap t-income">
             Pay {cedis(v.income)}
             {v.extraIncome ? ` · extra ${cedis(v.extraIncome)} received` : incomeRows.some((i) => i.variable) ? " · extra income counts when it arrives" : ""}
+            {v.carried ? ` · ${cedis(v.carried)} kept from last cycle` : ""}
           </div>
         </div>
         <div className="sk-kpi hide-mobile">
@@ -167,9 +190,9 @@ export default async function Home() {
             <b className="sk-h">Your split</b>
             <Link className="sk-link" style={{ fontSize: 14 }} href="/budget#scheme">Change</Link>
           </div>
-          <div className="sk-cap">{schemeLabel(v.scheme)} on GH₵ {cedis(v.income + v.extraIncome)}</div>
+          <div className="sk-cap">{schemeLabel(v.scheme)} on GH₵ {cedis(v.income + v.extraIncome + v.carried)}</div>
           <div className="sk-row" style={{ gap: 20, marginTop: 16 }}>
-            <Donut parts={v.buckets.map((b) => ({ key: b.key, value: b.actual }))} total={v.income + v.extraIncome} label="Spending by bucket" />
+            <Donut parts={v.buckets.map((b) => ({ key: b.key, value: b.actual }))} total={v.income + v.extraIncome + v.carried} label="Spending by bucket" />
             <div className="sk-stack grow" style={{ gap: 12, fontSize: 14 }}>
               {v.buckets.map((b) => (
                 <div key={b.key}>

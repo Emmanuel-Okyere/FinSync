@@ -72,3 +72,17 @@ import { cycleBounds, cycleEndFrom, fmtCycle, occurrencesInRange, prevPayday } f
   same("bill on the 31st in a short month", occurrencesInRange(31, "2026-11-23", "2026-12-22"), ["2026-11-30"]);
   if (f) { console.log(`${f} FAILED (cycles)`); process.exit(1); } else console.log("CYCLES PASS");
 }
+
+// ---------------------------------------------------------------- Yearly due dates (set-asides)
+import { addYears } from "../src/lib/dates.ts";
+{
+  let f = 0;
+  const same = (name: string, got: string, want: string) => {
+    if (got !== want) f++;
+    console.log(`${got === want ? "PASS" : "FAIL"} ${name}: ${got} (want ${want})`);
+  };
+  same("next year", addYears("2027-10-01", 1), "2028-10-01");
+  same("29 Feb to a non-leap year", addYears("2028-02-29", 1), "2029-02-28");
+  same("29 Feb to a leap year", addYears("2028-02-29", 4), "2032-02-29");
+  if (f) { console.log(`${f} FAILED (due dates)`); process.exit(1); } else console.log("DUE DATES PASS");
+}

@@ -183,6 +183,11 @@ export const budgetPeriods = pgTable(
     incomeMinor: money("income_minor").notNull(),
     // Fixed-expense occurrences already auto-logged ("<fixedId>:<date>"). Deleting the entry won't bring it back.
     loggedFixed: jsonb("logged_fixed").$type<string[]>().notNull().default([]),
+    // Payday review: leftover kept from the cycle before (adds to this cycle's budget)...
+    carriedInMinor: money("carried_in_minor").notNull().default(0),
+    // ...and, on the finished cycle, what was kept forward and when its leftover was dealt with.
+    carriedOutMinor: money("carried_out_minor").notNull().default(0),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -205,6 +210,10 @@ export const fixedExpenses = pgTable(
     method: text("method").notNull().default("bank"),
     // Subscriptions and direct debits: no transfer charge.
     noCharge: boolean("no_charge").notNull().default(false),
+    // Amount changes each time (electricity, water): planned from recent payments, not auto-logged.
+    varies: boolean("varies").notNull().default(false),
+    // The account it's paid from (its charge and automatic-savings rules apply).
+    accountId: uuid("account_id").references((): AnyPgColumn => accounts.id, { onDelete: "set null" }),
     insurancePolicyId: uuid("insurance_policy_id"),
     createdAt: createdAt(),
   },
@@ -314,7 +323,7 @@ export const transactions = pgTable(
     note: text("note"),
     method: text("method").notNull().default("momo"),
     occurredOn: date("occurred_on").notNull(),
-    source: text("source").notNull().default("manual"), // manual | fixed | import | fee (older: strike | adjust)
+    source: text("source").notNull().default("manual"), // manual | fixed | import | fee | review | autosave (older: strike | adjust)
     importHash: text("import_hash"),
     // Idempotency key for system-created rows (auto-logged fixed costs, premiums).
     dedupeKey: text("dedupe_key"),
@@ -322,10 +331,16 @@ export const transactions = pgTable(
     insurancePolicyId: uuid("insurance_policy_id").references(() => insurancePolicies.id, { onDelete: "set null" }),
     // A transfer charge points at the payment it belongs to; deleting the payment deletes the charge.
     feeForId: uuid("fee_for_id").references((): AnyPgColumn => transactions.id, { onDelete: "cascade" }),
+    // The user's own account the money moved through (optional; `method` stays the kind of payment).
+    accountId: uuid("account_id").references((): AnyPgColumn => accounts.id, { onDelete: "set null" }),
+    // Automatic saving: points at the payment that triggered it and the savings place it went to.
+    saveForId: uuid("save_for_id").references((): AnyPgColumn => transactions.id, { onDelete: "cascade" }),
+    savingsAccountId: uuid("savings_account_id").references((): AnyPgColumn => savingsAccounts.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [
     index("transactions_fee_for_idx").on(t.feeForId),
+    index("transactions_save_for_idx").on(t.saveForId),
     index("transactions_user_date_idx").on(t.userId, t.occurredOn),
     index("transactions_household_idx").on(t.householdId, t.occurredOn),
     index("transactions_import_hash_idx").on(t.userId, t.importHash),
@@ -333,6 +348,42 @@ export const transactions = pgTable(
     check("tx_amount_nonzero", sql`${t.amountMinor} > 0`),
     check("tx_kind", sql`${t.kind} IN ('income','expense')`),
   ],
+);
+
+/**
+ * Money put aside each cycle for a big bill that comes once (or once a year): rent, insurance, school fees.
+ * Contributions are expenses in its own category, so each cycle's budget plans and counts them;
+ * paying the bill draws on the pot and doesn't count against that cycle a second time.
+ */
+export const setAsides = pgTable(
+  "set_asides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id").notNull().references(() => categories.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    targetMinor: money("target_minor").notNull(),
+    // Already put aside before using FinSync (not counted against any cycle).
+    openingMinor: money("opening_minor").notNull().default(0),
+    dueOn: date("due_on").notNull(),
+    repeat: text("repeat").notNull().default("yearly"), // yearly | once
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index("set_asides_user_idx").on(t.userId), uniqueIndex("set_asides_category_uq").on(t.categoryId), check("set_aside_target_pos", sql`${t.targetMinor} > 0`)],
+);
+
+export const setAsidePayouts = pgTable(
+  "set_aside_payouts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    setAsideId: uuid("set_aside_id").notNull().references(() => setAsides.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    amountMinor: money("amount_minor").notNull(),
+    paidOn: date("paid_on").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("set_aside_payouts_idx").on(t.setAsideId), check("set_aside_payout_pos", sql`${t.amountMinor} > 0`)],
 );
 
 /* ------------------------------------------------- Savings, debts, investing */
@@ -348,11 +399,41 @@ export const savingsAccounts = pgTable(
     goalMinor: money("goal_minor"),
     maturesOn: date("matures_on"),
     expectedReturnMinor: money("expected_return_minor"),
+    // Money you don't touch until the account is closed (e.g. a bank's lifestyle savings).
+    locked: boolean("locked").notNull().default(false),
     note: text("note"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (t) => [index("savings_user_idx").on(t.userId)],
+);
+
+/**
+ * The user's own accounts, named like buckets ("Stanbic current", "MTN MoMo"). No account numbers:
+ * an optional last 4 digits only tells two accounts at one bank apart.
+ */
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(), // bank | momo | card | ghanapay | cash | other (the payment method it implies)
+    last4: text("last4"),
+    // Its own transfer-charge rule; null = the user's rule for its kind.
+    fee: jsonb("fee").$type<{ pct: number; cap: number }>(),
+    // Automatic saving the bank takes on each payment: amount, where it goes, and categories it skips.
+    saveMinor: money("save_minor").notNull().default(0),
+    saveToId: uuid("save_to_id").references(() => savingsAccounts.id, { onDelete: "set null" }),
+    saveExcept: jsonb("save_except").$type<string[]>().notNull().default([]),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("accounts_user_name_uq").on(t.userId, t.name),
+    check("accounts_last4", sql`${t.last4} IS NULL OR ${t.last4} ~ '^[0-9]{4}$'`),
+    check("accounts_save_pos", sql`${t.saveMinor} >= 0`),
+  ],
 );
 
 export const debts = pgTable(
@@ -412,6 +493,8 @@ export type ImportRow = {
   method: string;
   /** Transfer charge from the statement's fee column, if any. */
   feeMinor?: number;
+  /** An automatic-savings debit: index of the payment row it belongs to. */
+  saveFor?: number;
   categoryId: string | null;
   hash: string;
   duplicate: boolean;
@@ -424,6 +507,7 @@ export const importBatches = pgTable("import_batches", {
   source: text("source").notNull(),
   fileName: text("file_name").notNull(),
   rows: jsonb("rows").$type<ImportRow[]>().notNull(),
+  accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
   status: text("status").notNull().default("pending"), // pending | done
   importedCount: integer("imported_count").notNull().default(0),
   createdAt: createdAt(),

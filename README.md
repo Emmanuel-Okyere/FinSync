@@ -108,3 +108,9 @@ Payments can carry a transfer charge, recorded as its own expense in the **Trans
 - **Statement imports** read a Fees / Charges / E-Levy column when present and record it as the linked charge.
 
 `npm run test:fees` checks the rules and the statement fee column.
+
+## Bills that change, set-asides and the payday check-in
+
+- **Bills that change** (Fixed expenses → "Amount changes each month"): planned at the average of the bill's last 3 payments in the past year, rounded up to the cedi (`billSuggestions()` in `src/lib/plans.ts`). A payment is anything logged against the bill, or in its category under its name; "Mark paid" now links the payment to the bill. These bills aren't auto-logged, since the amount isn't known until it's paid.
+- **Set-asides** (`/budget/set-asides`, tables `set_asides` and `set_aside_payouts`): yearly rent, insurance, school fees. Each has an amount, a due date, "every year" or "once", and an optional amount already saved. Each cycle gets a "Set aside · …" line for what's still missing, spread over the cycles left before the due date (`setAsidePerCycle()`). Putting money aside is an expense in that line, so it comes out of that cycle's budget. Paying the bill draws on the pot and doesn't count against the cycle again. A yearly set-aside then moves to the same date next year.
+- **Payday check-in** (Overview): when a cycle ends with money unspent, the next cycle shows a card to keep it (added to this cycle and split by the scheme, stored as `budget_months.carried_in_minor` / `carried_out_minor`), move it to a savings category (optionally adding it to a savings account's balance), or put it towards a set-aside. It can be split across several choices, or dismissed with "Leave it". Moves are dated on the finished cycle's last day, so they count as that cycle's money.

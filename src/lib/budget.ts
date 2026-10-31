@@ -13,7 +13,8 @@ import {
 } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import { DEFAULT_CATEGORIES, STARTER_SPLIT } from "@/lib/categories";
-import { ruleFee, syncCharge } from "@/lib/charges";
+import { syncCharge } from "@/lib/charges";
+import { accountFee, rememberedSave, savesOn, syncAutoSave, userAccounts } from "@/lib/accounts";
 import {
   addDays,
   cycleBounds,
@@ -26,6 +27,7 @@ import {
   type WeekendShift,
 } from "@/lib/dates";
 import { DEFAULT_SCHEME, bucketFor } from "@/lib/schemes";
+import { autoSavePlans, billSuggestions, setAsideCategoryIds, setAsidePlans } from "@/lib/plans";
 
 export async function ensureCategories(userId: string) {
   await db
@@ -86,26 +88,40 @@ async function plannedBounds(user: SessionUser, date: string) {
   return { start, end };
 }
 
-/** Planned amount per category for a fixed expense in a cycle: one charge per time its day falls inside it. */
-function fixedPlan(f: typeof fixedExpenses.$inferSelect, start: string, end: string) {
+/**
+ * Planned amount per category for a fixed expense in a cycle: one charge per time its day falls inside it.
+ * Bills that change use the average of recent payments when there are any.
+ */
+function fixedPlan(f: typeof fixedExpenses.$inferSelect, start: string, end: string, suggested?: number) {
   const n = f.dayOfMonth == null ? 1 : occurrencesInRange(f.dayOfMonth, start, end).length;
-  return f.amountMinor * n;
+  return (suggested ?? f.amountMinor) * n;
+}
+
+/** Fixed bills and set-asides planned per category for a cycle. */
+async function plannedCommitments(userId: string, start: string, end: string) {
+  const fixed = await db
+    .select()
+    .from(fixedExpenses)
+    .where(and(eq(fixedExpenses.userId, userId), eq(fixedExpenses.active, true)));
+  const [suggest, pots, autos] = await Promise.all([billSuggestions(userId, fixed, start), setAsidePlans(userId, start, end), autoSavePlans(userId, start, end)]);
+  const byCat = new Map<string, { planned: number; fixedId: string | null }>();
+  for (const f of fixed) {
+    const amount = fixedPlan(f, start, end, suggest.get(f.id)?.suggested);
+    if (!amount) continue; // not due in this (short) cycle
+    const cur = byCat.get(f.categoryId);
+    byCat.set(f.categoryId, { planned: (cur?.planned ?? 0) + amount, fixedId: cur?.fixedId ?? f.id });
+  }
+  for (const [categoryId, amount] of pots) if (amount > 0 && !byCat.has(categoryId)) byCat.set(categoryId, { planned: amount, fixedId: null });
+  for (const [categoryId, amount] of autos) if (amount > 0 && !byCat.has(categoryId)) byCat.set(categoryId, { planned: amount, fixedId: null });
+  return byCat;
 }
 
 /** After a cycle's dates change, re-plan its fixed-bill lines for the new range (other lines are untouched). */
 async function replanFixed(userId: string, periodId: string) {
   const [p] = await db.select().from(budgetPeriods).where(eq(budgetPeriods.id, periodId));
   if (!p) return;
-  const fixed = await db
-    .select()
-    .from(fixedExpenses)
-    .where(and(eq(fixedExpenses.userId, userId), eq(fixedExpenses.active, true)));
-  const byCat = new Map<string, { amount: number; fixedId: string }>();
-  for (const f of fixed) {
-    const cur = byCat.get(f.categoryId);
-    byCat.set(f.categoryId, { amount: (cur?.amount ?? 0) + fixedPlan(f, p.start, p.end), fixedId: cur?.fixedId ?? f.id });
-  }
-  for (const [categoryId, { amount, fixedId }] of byCat) {
+  const byCat = await plannedCommitments(userId, p.start, p.end);
+  for (const [categoryId, { planned: amount, fixedId }] of byCat) {
     await db
       .insert(budgetLines)
       .values({ monthId: p.id, userId, categoryId, plannedMinor: amount, fixedExpenseId: fixedId })
@@ -135,18 +151,7 @@ async function createPeriod(user: SessionUser, start: string, end: string): Prom
   const income = await incomeTotal(user.id);
   const cats = await db.select().from(categories).where(eq(categories.userId, user.id));
   const byName = new Map(cats.map((c) => [c.name, c]));
-  const fixed = await db
-    .select()
-    .from(fixedExpenses)
-    .where(and(eq(fixedExpenses.userId, user.id), eq(fixedExpenses.active, true)));
-
-  const planned = new Map<string, { planned: number; fixedId: string | null }>();
-  for (const f of fixed) {
-    const amount = fixedPlan(f, start, end);
-    if (!amount) continue; // not due in this (short) cycle
-    const cur = planned.get(f.categoryId);
-    planned.set(f.categoryId, { planned: (cur?.planned ?? 0) + amount, fixedId: cur?.fixedId ?? f.id });
-  }
+  const [planned, potCats] = await Promise.all([plannedCommitments(user.id, start, end), setAsideCategoryIds(user.id)]);
 
   // Carry over variable lines from the cycle before; otherwise seed a starter split.
   const [prev] = await db
@@ -157,7 +162,7 @@ async function createPeriod(user: SessionUser, start: string, end: string): Prom
     .limit(1);
   if (prev) {
     const prevLines = await db.select().from(budgetLines).where(eq(budgetLines.monthId, prev.id));
-    for (const l of prevLines) if (!l.fixedExpenseId && !planned.has(l.categoryId)) planned.set(l.categoryId, { planned: l.plannedMinor, fixedId: null });
+    for (const l of prevLines) if (!l.fixedExpenseId && !potCats.has(l.categoryId) && !planned.has(l.categoryId)) planned.set(l.categoryId, { planned: l.plannedMinor, fixedId: null });
   } else {
     const catBucket = new Map(cats.map((c) => [c.id, bucketFor(scheme, c.bucket)]));
     for (const b of scheme.buckets) {
@@ -202,7 +207,8 @@ async function autoLogFixed(user: SessionUser, period: Period) {
     .select()
     .from(fixedExpenses)
     .where(and(eq(fixedExpenses.userId, user.id), eq(fixedExpenses.active, true)));
-  const due = fixed.flatMap((f) =>
+  // Bills that change are planned, not logged: their amount isn't known until they're paid.
+  const due = fixed.filter((f) => !f.varies).flatMap((f) =>
     occurrencesInRange(f.dayOfMonth, period.start, today)
       // Older rows stored a bare id for "logged this calendar month".
       .filter((d) => !already.has(`${f.id}:${d}`) && !(already.has(f.id) && d.slice(0, 7) === period.start.slice(0, 7)))
@@ -224,6 +230,7 @@ async function autoLogFixed(user: SessionUser, period: Period) {
         categoryId: f.categoryId,
         name: f.name,
         method: f.method,
+        accountId: f.accountId,
         occurredOn: d,
         source: "fixed",
         fixedExpenseId: f.id,
@@ -232,13 +239,17 @@ async function autoLogFixed(user: SessionUser, period: Period) {
     )
     .onConflictDoNothing()
     .returning();
-  // Transfer charges on bills that carry them (not subscriptions / direct debits).
+  // Transfer charges on bills that carry them (not subscriptions / direct debits), and the account's automatic saving.
+  const accts = await userAccounts(user.id);
   for (const tx of inserted) {
     const f = fixed.find((x) => x.id === tx.fixedExpenseId);
-    if (f && !f.noCharge) {
-      const fee = ruleFee(user, tx.amountMinor, tx.method);
+    if (!f) continue;
+    const account = accts.find((a) => a.id === f.accountId) ?? null;
+    if (!f.noCharge) {
+      const fee = accountFee(user, tx.amountMinor, tx.method, account);
       if (fee) await syncCharge(user.id, tx, fee);
     }
+    if (savesOn(account, tx.categoryId)) await syncAutoSave(user, tx, account, await rememberedSave(account!, tx.categoryId));
   }
   const catIds = inserted.map((r) => r.categoryId!).filter(Boolean);
   if (catIds.length) {
@@ -344,6 +355,7 @@ export type LineView = {
   fixed: boolean;
   /** How the linked fixed bill is usually paid, for the "Mark paid" charge. */
   method: string | null;
+  accountId: string | null;
   noCharge: boolean;
   entries: number;
 };
@@ -373,6 +385,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
         icon: categories.icon,
         catBucket: categories.bucket,
         method: fixedExpenses.method,
+        accountId: fixedExpenses.accountId,
         noCharge: fixedExpenses.noCharge,
       })
       .from(budgetLines)
@@ -432,6 +445,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
       done: l.done,
       fixed: Boolean(l.fixedExpenseId),
       method: l.method,
+      accountId: l.accountId,
       noCharge: l.noCharge ?? false,
     }))
     .sort((a, b) => scheme.buckets.findIndex((x) => x.key === a.bucket) - scheme.buckets.findIndex((x) => x.key === b.bucket) || b.planned - a.planned);
@@ -441,7 +455,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
   const buckets: BucketView[] = scheme.buckets.map((b) => ({
     ...b,
     // Pay plus any extra income received this cycle, split by the scheme.
-    target: Math.round(((m.incomeMinor + extraIncome) * b.pct) / 100),
+    target: Math.round(((m.incomeMinor + extraIncome + m.carriedInMinor) * b.pct) / 100),
     planned: lines.filter((l) => l.bucket === b.key).reduce((s, l) => s + l.planned, 0),
     actual: lines.filter((l) => l.bucket === b.key).reduce((s, l) => s + l.actual, 0),
   }));
@@ -477,6 +491,8 @@ export async function getPeriodView(user: SessionUser, date: string) {
     buckets,
     income: m.incomeMinor,
     extraIncome,
+    /** Leftover from the cycle before that the user chose to keep (payday review). */
+    carried: m.carriedInMinor,
     charges,
     isCurrent,
     day,
@@ -491,7 +507,7 @@ export async function getPeriodView(user: SessionUser, date: string) {
     savingsTarget: savings?.target ?? 0,
     totalPlanned,
     totalActual,
-    unassigned: m.incomeMinor + extraIncome - totalPlanned,
+    unassigned: m.incomeMinor + extraIncome + m.carriedInMinor - totalPlanned,
     doneCount: lines.filter((l) => l.done).length,
   };
 }
@@ -557,4 +573,27 @@ export function cutSuggestions(v: PeriodView): Cut[] {
     }
   }
   return cuts.slice(0, 4);
+}
+
+/**
+ * Payday review: the cycle that just ended, if it finished with money unspent and the user hasn't said
+ * what to do with it yet. Only offered for a cycle that ended in the last 45 days.
+ */
+export async function pendingReview(user: SessionUser, current: Period) {
+  const [prev] = await db
+    .select()
+    .from(budgetPeriods)
+    .where(and(eq(budgetPeriods.userId, user.id), lte(budgetPeriods.end, addDays(current.start, -1))))
+    .orderBy(desc(budgetPeriods.end))
+    .limit(1);
+  if (!prev || prev.reviewedAt || prev.end < addDays(todayISO(), -45)) return null;
+  const v = await getPeriodView(user, prev.start);
+  const leftover = leftoverOf(v);
+  if (leftover < 100) return null; // under a cedi: nothing to decide
+  return { period: v.period, leftover, saved: v.saved };
+}
+
+/** What a cycle ended with: everything it had, less what was spent or saved and what was already kept forward. */
+export function leftoverOf(v: PeriodView) {
+  return v.income + v.extraIncome + v.carried - v.totalActual - v.period.carriedOutMinor;
 }

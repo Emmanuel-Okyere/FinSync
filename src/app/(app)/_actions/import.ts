@@ -1,14 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { categories, importBatches, transactions, type ImportRow } from "@/db/schema";
+import { accounts, categories, importBatches, savingsAccounts, transactions, type ImportRow } from "@/db/schema";
 import { FormState, UserError, run, zUuid } from "@/lib/action";
 import { actionUser } from "@/lib/auth/session";
 import { ensureCategories } from "@/lib/budget";
-import { extractRows, parseCsv, rowHash, suggestCategory } from "@/lib/import";
+import { extractRows, markAutoSaves, parseCsv, rowHash, suggestCategory } from "@/lib/import";
+import { accountMethod } from "@/lib/accounts";
 import { enforce } from "@/lib/rate-limit";
 import { flash } from "@/lib/flash";
 import { chargesCategoryId } from "@/lib/charges";
@@ -20,6 +21,9 @@ export async function uploadStatement(_: FormState, fd: FormData): Promise<FormS
     const user = await actionUser();
     await enforce(`import:${user.id}`, 20, 60 * 60);
     const source = z.enum(["momo", "bank"]).parse(fd.get("source") ?? "momo");
+    const accountId = fd.get("accountId") ? zUuid.parse(fd.get("accountId")) : null;
+    const [account] = accountId ? await db.select().from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, user.id))) : [];
+    if (accountId && !account) throw new UserError("Pick one of your accounts.", "accountId");
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0) throw new UserError("Choose a CSV file.", "file");
     if (file.size > MAX_BYTES) throw new UserError("That file is over 4 MB.", "file");
@@ -53,7 +57,13 @@ export async function uploadStatement(_: FormState, fd: FormData): Promise<FormS
       const duplicate = hashes.has(hash) || sameDayAmount.has(`${r.occurredOn}|${r.kind}|${r.amountMinor}`);
       return { ...r, hash, duplicate, include: !duplicate, categoryId: suggestCategory(r.name, r.kind, byName, learned) };
     });
-    const [batch] = await db.insert(importBatches).values({ userId: user.id, source, fileName: name, rows: prepared }).returning({ id: importBatches.id });
+    // The account's bank takes automatic savings after payments: link those debits to their payments.
+    if (account?.saveToId && account.saveMinor > 0) {
+      markAutoSaves(prepared, account.saveMinor, account.saveExcept);
+      for (const r of prepared) if (r.saveFor != null) r.categoryId = null;
+    }
+    if (account) for (const r of prepared) r.method = accountMethod(account);
+    const [batch] = await db.insert(importBatches).values({ userId: user.id, source, fileName: name, rows: prepared, accountId: account?.id ?? null }).returning({ id: importBatches.id });
     await flash(`Found ${prepared.length} entr${prepared.length === 1 ? "y" : "ies"}. Check them before importing.`);
     redirect(`/import/${batch.id}`);
   });
@@ -67,9 +77,12 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
     if (!batch || batch.status !== "pending") throw new UserError("This import is already finished.");
     const catIds = new Set((await db.select({ id: categories.id }).from(categories).where(eq(categories.userId, user.id))).map((c) => c.id));
 
-    const chosen = batch.rows
-      .map((r, i) => ({ ...r, include: fd.get(`inc_${i}`) === "on", categoryId: String(fd.get(`cat_${i}`) ?? r.categoryId ?? "") || null }))
-      .filter((r) => r.include);
+    const [account] = batch.accountId ? await db.select().from(accounts).where(and(eq(accounts.id, batch.accountId), eq(accounts.userId, user.id))) : [];
+    const [saveTo] = account?.saveToId ? await db.select().from(savingsAccounts).where(and(eq(savingsAccounts.id, account.saveToId), eq(savingsAccounts.userId, user.id))) : [];
+    const all = batch.rows.map((r, i) => ({ ...r, i, include: fd.get(`inc_${i}`) === "on", categoryId: String(fd.get(`cat_${i}`) ?? r.categoryId ?? "") || null }));
+    // Automatic savings are recorded against their payment, not as spending.
+    const savesRows = saveTo ? all.filter((r) => r.include && r.saveFor != null) : [];
+    const chosen = all.filter((r) => r.include && !(saveTo && r.saveFor != null));
     for (const r of chosen) if (r.categoryId && !catIds.has(r.categoryId)) throw new UserError("Pick categories from your list.");
 
     // Mark done first so a double submit can't import twice.
@@ -82,6 +95,7 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
 
     const withFees = chosen.some((r) => r.kind === "expense" && r.feeMinor);
     const feeCat = withFees ? await chargesCategoryId(user.id) : null;
+    const idByRow = new Map<number, string>();
     for (let i = 0; i < chosen.length; i += 500) {
       const slice = chosen.slice(i, i + 500);
       const inserted = await db.insert(transactions).values(
@@ -92,11 +106,13 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
           categoryId: r.categoryId,
           name: r.name,
           method: r.method,
+          accountId: account?.id ?? null,
           occurredOn: r.occurredOn,
           source: "import",
           importHash: r.hash,
         })),
       ).returning({ id: transactions.id });
+      slice.forEach((r, j) => inserted[j] && idByRow.set(r.i, inserted[j].id));
       // The statement's own fee column becomes a linked "Transfer charges" entry.
       const fees = slice
         .map((r, j) => ({ r, parentId: inserted[j]?.id }))
@@ -111,10 +127,36 @@ export async function confirmImport(_: FormState, fd: FormData): Promise<FormSta
           occurredOn: r.occurredOn,
           source: "fee",
           feeForId: parentId!,
+          accountId: account?.id ?? null,
         }));
       if (fees.length) await db.insert(transactions).values(fees);
     }
-    await flash(`${chosen.length} entr${chosen.length === 1 ? "y" : "ies"} imported`);
+    if (saveTo && savesRows.length) {
+      await db.insert(categories).values({ userId: user.id, name: saveTo.name, bucket: "savings", icon: "wallet" }).onConflictDoNothing();
+      const [cat] = await db.select({ id: categories.id }).from(categories).where(and(eq(categories.userId, user.id), eq(categories.name, saveTo.name)));
+      const values = savesRows.map((r) => {
+        const parentId = r.saveFor != null ? idByRow.get(r.saveFor) : undefined;
+        const parent = r.saveFor != null ? batch.rows[r.saveFor] : undefined;
+        return {
+          userId: user.id,
+          kind: "expense" as const,
+          amountMinor: r.amountMinor,
+          categoryId: cat.id,
+          name: `${saveTo.name}${parent ? ` · ${parent.name}` : ""}`.slice(0, 80),
+          method: r.method,
+          accountId: account!.id,
+          occurredOn: r.occurredOn,
+          source: "autosave",
+          importHash: r.hash,
+          saveForId: parentId ?? null,
+          savingsAccountId: saveTo.id,
+        };
+      });
+      for (let i = 0; i < values.length; i += 500) await db.insert(transactions).values(values.slice(i, i + 500));
+      const total = values.reduce((s, v) => s + v.amountMinor, 0);
+      await db.update(savingsAccounts).set({ balanceMinor: sql`${savingsAccounts.balanceMinor} + ${total}`, updatedAt: new Date() }).where(eq(savingsAccounts.id, saveTo.id));
+    }
+    await flash(`${chosen.length} entr${chosen.length === 1 ? "y" : "ies"} imported${savesRows.length ? `, plus ${savesRows.length} automatic saving${savesRows.length === 1 ? "" : "s"} to ${saveTo!.name}` : ""}`);
     redirect(`/import/${batch.id}/done`);
   });
 }

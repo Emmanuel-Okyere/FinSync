@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ActionButton, ActionForm, Dialog, Field, Submit, useServerAction } from "@/components/forms";
-import { AddToLineButton, useFeeRules } from "@/components/app/AddEntry";
+import { AddToLineButton, usePayData } from "@/components/app/AddEntry";
+import { PaidWithSelect } from "@/components/PaidWithSelect";
+import { SaveField } from "@/components/SaveField";
+import { chargeRule, defaultPaidWith, resolvePaidWith } from "@/lib/paid-with";
 import { ChargeField } from "@/components/ChargeField";
-import { PAYMENT_METHODS } from "@/lib/fees";
 import { markLinePaid, removeLine, reopenLine, setLinePlanned } from "@/app/(app)/_actions/budget";
 import type { LineView } from "@/lib/budget";
 
@@ -38,10 +40,11 @@ function Check({ l, defaultDate }: { l: LineView; defaultDate: string }) {
 }
 
 function MarkPaidForm({ l, defaultDate }: { l: LineView; defaultDate: string }) {
-  const rules = useFeeRules();
+  const { accounts, saveMemory, rules } = usePayData();
   const remaining = Math.max(0, l.planned - l.actual);
   const [amount, setAmount] = useState((remaining / 100).toFixed(2));
-  const [method, setMethod] = useState(l.method ?? "momo");
+  const [paidWith, setPaidWith] = useState(() => defaultPaidWith(accounts, { accountId: l.accountId, method: l.method ?? undefined }));
+  const paid = resolvePaidWith(paidWith, accounts);
   const amt = Math.round((Number(amount.replace(/[,\s]/g, "")) || 0) * 100);
   return (
       <ActionForm action={markLinePaid} className="sk-stack">
@@ -61,13 +64,14 @@ function MarkPaidForm({ l, defaultDate }: { l: LineView; defaultDate: string }) 
         </div>
         <div className="sk-field">
           <label htmlFor={`method-${l.id}`}>Paid with</label>
-          <select id={`method-${l.id}`} className="sk-input" name="method" value={method} onChange={(e) => setMethod(e.target.value)}>
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
+          <PaidWithSelect id={`method-${l.id}`} className="sk-input" accounts={accounts} value={paidWith} onChange={setPaidWith} />
         </div>
-        {amt > 0 && l.name !== "Transfer charges" ? <ChargeField amount={amt} method={method} rules={rules} initialFee={l.noCharge ? 0 : undefined} /> : null}
+        {amt > 0 && l.name !== "Transfer charges" ? (
+          <ChargeField amount={amt} method={paid.method} rule={chargeRule(paid, rules)} ruleName={paid.account?.name} initialFee={l.noCharge ? 0 : undefined} />
+        ) : null}
+        {amt > 0 && paid.account?.save ? (
+          <SaveField key={paid.account.id} account={paid.account} categoryId={l.categoryId} remembered={saveMemory[`${paid.account.id}:${l.categoryId}`]} />
+        ) : null}
         <Submit>Mark paid</Submit>
       </ActionForm>
   );

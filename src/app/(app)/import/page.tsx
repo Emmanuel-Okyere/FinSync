@@ -2,12 +2,14 @@ import { ActionForm, FieldError, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { PageHead } from "@/components/app/PageHead";
 import { requireOnboardedUser } from "@/lib/auth/session";
+import { userAccounts } from "@/lib/accounts";
 import { uploadStatement } from "../_actions/import";
 
 export const metadata = { title: "Import · FinSync" };
 
 export default async function ImportSource() {
-  await requireOnboardedUser();
+  const user = await requireOnboardedUser();
+  const accts = (await userAccounts(user.id)).filter((a) => a.kind !== "cash");
   return (
     <>
       <PageHead title="Import" back="/settings" add={false} search={false} />
@@ -31,6 +33,18 @@ export default async function ImportSource() {
               </label>
             ))}
           </fieldset>
+          {accts.length ? (
+            <div className="sk-field">
+              <label htmlFor="accountId">Which account is it for?</label>
+              <select id="accountId" name="accountId" className="sk-input" defaultValue={accts[0].id}>
+                {accts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}{a.last4 ? ` ···${a.last4}` : ""}</option>
+                ))}
+                <option value="">None of these</option>
+              </select>
+              <span className="sk-cap">Entries are recorded against it, and any automatic savings its bank takes are matched to their payments.</span>
+            </div>
+          ) : null}
           <div className="sk-card sk-card--flat sk-card--pad sk-stack" style={{ borderStyle: "dashed" }}>
             <label htmlFor="file" className="sk-row" style={{ gap: 12, cursor: "pointer" }}>
               <span className="sk-tile sk-tile--needs"><Icon name="upload" /></span>

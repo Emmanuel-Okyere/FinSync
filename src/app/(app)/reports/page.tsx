@@ -34,7 +34,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
     const date = sp.p || sp.m ? parseDateParam(sp.p, sp.m) : addDays((await ensurePeriod(user, today)).start, -1);
     const v = await periodView(user, date);
     const { start, end, label } = v.period;
-    const inn = v.income + v.extraIncome;
+    const inn = v.income + v.extraIncome + v.carried;
     const out = v.totalActual - v.saved;
     const savePct = inn ? (v.saved / inn) * 100 : 0;
     const target = v.scheme.buckets.find((b) => b.key === "savings")?.pct ?? 0;
@@ -60,7 +60,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
               <Icon name={savePct >= target ? "check" : "bell"} />
               Saved {savePct.toFixed(1)}% · {savePct >= target ? "scheme target met" : `target ${target}%`}
             </div>
-            <div className="sk-cap">In = planned pay (GH₵ {cedis(v.income)}) plus extra income you logged.</div>
+            <div className="sk-cap">In = planned pay (GH₵ {cedis(v.income)}) plus extra income you logged{v.carried ? ` and GH₵ ${cedis(v.carried)} kept from the cycle before` : ""}.</div>
             {v.charges ? <div className="sk-cap">Transfer charges: GH₵ {cedis(v.charges, 2)} of what went out.</div> : null}
           </div>
           <div className="sk-card sk-card--pad sk-stack">

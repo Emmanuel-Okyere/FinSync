@@ -116,7 +116,9 @@ export default async function Settings() {
             </Dialog>
             <Row icon="calculator" label="Tax and SSNIT calculator" href="/tax" />
             <Row icon="sliders" label="Scheme" value={schemeLabel(user.scheme)} href="/budget#scheme" />
+            <Row icon="bank" label="Accounts" value="Paid with" href="/settings/accounts" />
             <Row icon="repeat" label="Fixed expenses" href="/budget/fixed" />
+            <Row icon="calendar" label="Set-asides" value="Yearly bills" href="/budget/set-asides" />
             <Dialog
               title="Transfer charges"
               triggerClassName="sk-tx"

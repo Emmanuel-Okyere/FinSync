@@ -70,51 +70,44 @@ export async function rotateSession(raw: string, meta: Meta): Promise<IssuedSess
     )
     .returning();
 
-  if (claimed) {
-    const [user] = await db.select({ sv: users.sessionVersion }).from(users).where(eq(users.id, claimed.userId));
-    if (!user) return null;
-    const next = newRaw();
-    await db.insert(refreshTokens).values({
-      userId: claimed.userId,
-      familyId: claimed.familyId,
-      tokenHash: hashToken(next),
-      persistent: claimed.persistent,
-      expiresAt: expiry(claimed.persistent),
-      userAgent: meta.userAgent?.slice(0, 300) ?? claimed.userAgent,
-      ip: meta.ip ?? claimed.ip,
-    });
-    return {
-      accessToken: await signAccessToken({ sub: claimed.userId, sv: user.sv, fid: claimed.familyId }),
-      refreshToken: next,
-      persistent: claimed.persistent,
-      userId: claimed.userId,
-    };
-  }
+  if (claimed) return issueSuccessor(claimed, meta);
 
   const [existing] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, tokenHash));
   if (!existing || existing.revokedAt || existing.expiresAt <= now) return null;
 
   if (existing.usedAt && now.getTime() - existing.usedAt.getTime() <= REFRESH_REUSE_GRACE_MS) {
-    // A parallel request already rotated this token: hand out an access token only.
-    const [family] = await db
-      .select({ id: refreshTokens.id })
-      .from(refreshTokens)
-      .where(and(eq(refreshTokens.familyId, existing.familyId), isNull(refreshTokens.revokedAt)))
-      .limit(1);
-    const [user] = await db.select({ sv: users.sessionVersion }).from(users).where(eq(users.id, existing.userId));
-    if (!family || !user) return null;
-    return {
-      accessToken: await signAccessToken({ sub: existing.userId, sv: user.sv, fid: existing.familyId }),
-      refreshToken: null,
-      persistent: existing.persistent,
-      userId: existing.userId,
-    };
+    // A parallel request already rotated this token. It gets its own successor in the same family:
+    // if the browser drops the other response (a cancelled navigation or prefetch), it must still end
+    // up holding a live refresh token, or its next refresh would look like theft and sign it out.
+    return issueSuccessor(existing, meta);
   }
 
   // Reuse of a rotated token: someone else holds a copy. Revoke the whole family.
   await revokeFamily(existing.familyId);
   console.warn(`[auth] refresh token reuse detected; family ${existing.familyId} revoked`);
   return null;
+}
+
+/** New single-use refresh token in the same family, plus an access token. */
+async function issueSuccessor(prev: typeof refreshTokens.$inferSelect, meta: Meta): Promise<IssuedSession | null> {
+  const [user] = await db.select({ sv: users.sessionVersion }).from(users).where(eq(users.id, prev.userId));
+  if (!user) return null;
+  const next = newRaw();
+  await db.insert(refreshTokens).values({
+    userId: prev.userId,
+    familyId: prev.familyId,
+    tokenHash: hashToken(next),
+    persistent: prev.persistent,
+    expiresAt: expiry(prev.persistent),
+    userAgent: meta.userAgent?.slice(0, 300) ?? prev.userAgent,
+    ip: meta.ip ?? prev.ip,
+  });
+  return {
+    accessToken: await signAccessToken({ sub: prev.userId, sv: user.sv, fid: prev.familyId }),
+    refreshToken: next,
+    persistent: prev.persistent,
+    userId: prev.userId,
+  };
 }
 
 export async function revokeFamily(familyId: string) {

@@ -4,11 +4,14 @@ import { useId, useMemo, useState } from "react";
 import { ActionButton, ActionForm, FieldError, Submit } from "@/components/forms";
 import { Icon } from "@/components/Icon";
 import { ChargeField } from "@/components/ChargeField";
-import { DEFAULT_FEES, PAYMENT_METHODS, type FeeRules } from "@/lib/fees";
+import { PaidWithSelect } from "@/components/PaidWithSelect";
+import { SaveField } from "@/components/SaveField";
+import { DEFAULT_FEES, type FeeRules } from "@/lib/fees";
+import { chargeRule, defaultPaidWith, resolvePaidWith, type PayAccount } from "@/lib/paid-with";
 import { addEntry, deleteEntry, updateEntry } from "@/app/(app)/_actions/transactions";
 
 export type EntryCat = { id: string; name: string; icon: string; bucket: string; bucketName: string; kind: string; planned?: number; actual?: number };
-export type EntryInit = { id: string; kind: "income" | "expense"; amount: string; categoryId: string | null; occurredOn: string; method: string; name: string; note: string | null; feeMinor?: number };
+export type EntryInit = { id: string; kind: "income" | "expense"; amount: string; categoryId: string | null; occurredOn: string; method: string; name: string; note: string | null; feeMinor?: number; saveMinor?: number; accountId?: string | null; source?: string };
 
 const tone = (b: string) => (b === "needs" ? "needs" : b === "wants" ? "wants" : b === "savings" ? "savings" : b === "income" ? "under" : "over");
 const cedi = (minor: number) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 0 }).format(Math.round(minor / 100));
@@ -23,6 +26,8 @@ export function EntryForm({
   defaultDate,
   presetKind,
   feeRules = DEFAULT_FEES,
+  accounts = [],
+  saveMemory = {},
 }: {
   cats: EntryCat[];
   today: string;
@@ -34,6 +39,8 @@ export function EntryForm({
   defaultDate?: string;
   presetKind?: "income" | "expense";
   feeRules?: FeeRules;
+  accounts?: PayAccount[];
+  saveMemory?: Record<string, number>;
 }) {
   const [kind, setKind] = useState<"income" | "expense">(initial?.kind ?? presetKind ?? "expense");
   const list = useMemo(() => cats.filter((c) => c.kind === kind), [cats, kind]);
@@ -42,7 +49,10 @@ export function EntryForm({
   const cat = list.find((c) => c.id === catId);
   const uid = useId();
   const amt = Math.round((Number(amount.replace(/[,\s]/g, "")) || 0) * 100);
-  const [method, setMethod] = useState(initial?.method ?? "momo");
+  const [paidWith, setPaidWith] = useState(() => defaultPaidWith(accounts, initial));
+  const paid = resolvePaidWith(paidWith, accounts);
+  // Charges and automatic savings belong to a payment: they never carry their own.
+  const isCharge = cat?.name === "Transfer charges" || initial?.source === "fee" || initial?.source === "autosave";
 
   return (
     <>
@@ -129,15 +139,20 @@ export function EntryForm({
           </div>
           <div className="sk-field">
             <label htmlFor={`${uid}-entry-method`}>Paid with</label>
-            <select id={`${uid}-entry-method`} className="sk-input sk-input--sm" name="method" value={method} onChange={(e) => setMethod(e.target.value)}>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
+            <PaidWithSelect id={`${uid}-entry-method`} accounts={accounts} value={paidWith} onChange={setPaidWith} />
           </div>
         </div>
-        {kind === "expense" && cat?.name !== "Transfer charges" ? (
-          <ChargeField amount={amt} method={method} rules={feeRules} initialFee={initial ? (initial.feeMinor ?? 0) : undefined} />
+        {kind === "expense" && !isCharge ? (
+          <ChargeField amount={amt} method={paid.method} rule={chargeRule(paid, feeRules)} ruleName={paid.account?.name} initialFee={initial ? (initial.feeMinor ?? 0) : undefined} />
+        ) : null}
+        {kind === "expense" && !isCharge && paid.account?.save ? (
+          <SaveField
+            key={`${paid.account.id}:${catId}`}
+            account={paid.account}
+            categoryId={catId}
+            remembered={saveMemory[`${paid.account.id}:${catId}`]}
+            initial={initial && initial.accountId === paid.account.id ? (initial.saveMinor ?? 0) : undefined}
+          />
         ) : null}
         <input className="sk-input sk-input--sm" name="note" maxLength={300} defaultValue={initial?.note ?? ""} placeholder="Note (optional)" aria-label="Note" />
         {!initial && cat?.name === "Insurance" && policies.length ? (

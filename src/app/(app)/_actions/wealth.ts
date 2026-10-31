@@ -35,13 +35,14 @@ const accountSchema = z.object({
   maturesOn: zDateOpt,
   expectedReturn: zMoneyOpt("Expected return"),
   note: zTextOpt(120),
+  locked: zBool,
 });
 
 export async function saveAccount(_: FormState, fd: FormData): Promise<FormState> {
   return run(async () => {
     const user = await actionUser();
     const d = accountSchema.parse(formObject(fd));
-    const values = { name: d.name, kind: d.kind, balanceMinor: d.balance, goalMinor: d.goal ?? null, maturesOn: d.maturesOn ?? null, expectedReturnMinor: d.expectedReturn ?? null, note: d.note, updatedAt: new Date() };
+    const values = { name: d.name, kind: d.kind, balanceMinor: d.balance, goalMinor: d.goal ?? null, maturesOn: d.maturesOn ?? null, expectedReturnMinor: d.expectedReturn ?? null, note: d.note, locked: d.locked, updatedAt: new Date() };
     const id = fd.get("id") ? zUuid.parse(fd.get("id")) : null;
     if (id) {
       const r = await db.update(savingsAccounts).set(values).where(and(eq(savingsAccounts.id, id), eq(savingsAccounts.userId, user.id))).returning({ id: savingsAccounts.id });
@@ -69,6 +70,7 @@ export async function moveSavings(_: FormState, fd: FormData): Promise<FormState
     if (d.amount <= 0) throw new UserError("Enter an amount above zero.", "amount");
     const [acct] = await db.select().from(savingsAccounts).where(and(eq(savingsAccounts.id, d.id), eq(savingsAccounts.userId, user.id)));
     if (!acct) throw new UserError("That account no longer exists.");
+    if (d.direction === "out" && acct.locked) throw new UserError(`${acct.name} is locked until you close it. Unlock it in its details first.`);
     const delta = d.direction === "in" ? d.amount : -d.amount;
     if (acct.balanceMinor + delta < 0) throw new UserError("That's more than the balance.", "amount");
     await db.update(savingsAccounts).set({ balanceMinor: sql`${savingsAccounts.balanceMinor} + ${delta}`, updatedAt: new Date() }).where(eq(savingsAccounts.id, acct.id));

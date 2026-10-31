@@ -150,3 +150,33 @@ export function suggestCategory(name: string, kind: "income" | "expense", byName
 
 export const rowHash = (r: ParsedRow) =>
   createHash("sha256").update(`${r.occurredOn}|${r.kind}|${r.amountMinor}|${r.name.toLowerCase().replace(/\s+/g, " ")}`).digest("hex").slice(0, 32);
+
+const SAVE_HINT = /lifestyle|auto\s*-?\s*sav|sav(e|ings?)\s*(plan|sweep|transfer|deduction|debit)|\bsweep\b/i;
+
+/**
+ * Finds the automatic-savings debits an account's bank takes after payments (e.g. GH₵ 100 to lifestyle
+ * savings) and links each to its payment: same day, next to it in the statement (either order).
+ * A row counts if its description says so, or if it's exactly the usual amount next to a payment that
+ * isn't in a skipped category. Sets `saveFor` to the payment's index.
+ */
+export function markAutoSaves<T extends { kind: string; amountMinor: number; name: string; occurredOn: string; categoryId?: string | null; saveFor?: number }>(
+  rows: T[],
+  usual: number,
+  except: string[] = [],
+) {
+  const parents = new Set<number>();
+  rows.forEach((r, i) => {
+    if (r.kind !== "expense" || parents.has(i)) return;
+    const hinted = SAVE_HINT.test(r.name);
+    if (!hinted && r.amountMinor !== usual) return;
+    for (const j of [i - 1, i + 1]) {
+      const p = rows[j];
+      if (!p || p.kind !== "expense" || p.occurredOn !== r.occurredOn || p.saveFor != null || parents.has(j) || SAVE_HINT.test(p.name)) continue;
+      if (!hinted && p.categoryId && except.includes(p.categoryId)) continue;
+      r.saveFor = j;
+      parents.add(j);
+      break;
+    }
+  });
+  return rows;
+}

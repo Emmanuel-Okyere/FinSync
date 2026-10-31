@@ -52,6 +52,10 @@ export type TxLike = {
   catIcon: string | null;
   catBucket: string | null;
   feeMinor?: number;
+  saveMinor?: number;
+  accountId?: string | null;
+  accountName?: string | null;
+  source?: string;
 };
 
 export function txTone(t: TxLike) {
@@ -71,13 +75,16 @@ export function Tx({ t, meta, highlight }: { t: TxLike; meta?: string; highlight
     name: t.name,
     note: t.note,
     feeMinor: t.feeMinor ?? 0,
+    saveMinor: t.saveMinor ?? 0,
+    accountId: t.accountId ?? null,
+    source: t.source,
   };
   return (
     <TxRow
       entry={entry}
       icon={t.catIcon ?? (t.kind === "income" ? "arrowDownLeft" : "tag")}
       tone={txTone(t)}
-      meta={`${meta ?? `${relDay(t.occurredOn)} · ${t.catName ?? METHOD_LABEL[t.method] ?? ""}`}${t.feeMinor ? ` · +${cedis(t.feeMinor, 2)} charge` : ""}`}
+      meta={`${meta ?? `${relDay(t.occurredOn)} · ${t.catName ?? t.accountName ?? METHOD_LABEL[t.method] ?? ""}`}${t.feeMinor ? ` · +${cedis(t.feeMinor, 2)} charge` : ""}${t.saveMinor ? ` · +${cedis(t.saveMinor, 2)} saved` : ""}`}
       amountText={`${t.kind === "income" ? "+" : "−"}${cedis(t.amountMinor, 2)}`}
       amountClass={t.kind === "income" ? "t-income" : ""}
       highlight={highlight}

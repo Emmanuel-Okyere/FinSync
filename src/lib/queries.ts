@@ -17,6 +17,11 @@ export const txSelect = {
   catBucket: categories.bucket,
   // Linked transfer charge on this payment (charges themselves are listed only in exports).
   feeMinor: sql<number>`coalesce((select f.amount_minor from transactions f where f.fee_for_id = ${transactions.id} limit 1), 0)::int`,
+  // Linked automatic saving the account took for this payment.
+  saveMinor: sql<number>`coalesce((select s.amount_minor from transactions s where s.save_for_id = ${transactions.id} limit 1), 0)::int`,
+  accountId: transactions.accountId,
+  source: transactions.source,
+  accountName: sql<string | null>`(select a.name from accounts a where a.id = ${transactions.accountId})`,
 };
 
 /** Escapes LIKE wildcards so user search text is matched literally. */
@@ -30,7 +35,7 @@ export async function listTransactions(
 ) {
   const where: SQL[] = [eq(transactions.userId, userId)];
   // Charges show under their parent payment, unless asked for (export) or browsing the charges category.
-  if (!opts.includeCharges && !opts.categoryId) where.push(isNull(transactions.feeForId));
+  if (!opts.includeCharges && !opts.categoryId) where.push(isNull(transactions.feeForId), isNull(transactions.saveForId));
   if (opts.from) where.push(gte(transactions.occurredOn, opts.from));
   if (opts.to) where.push(lte(transactions.occurredOn, opts.to));
   if (opts.kind) where.push(eq(transactions.kind, opts.kind));

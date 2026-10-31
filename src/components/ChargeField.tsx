@@ -1,31 +1,31 @@
 "use client";
 
 import { useId, useState } from "react";
-import { METHOD_LABEL, transferFee, type FeeRules } from "@/lib/fees";
+import { METHOD_LABEL, feeFor, type FeeRule } from "@/lib/fees";
 
 const f2 = (m: number) => new Intl.NumberFormat("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(m / 100);
 
 /**
- * Transfer charge for a payment, worked out from the user's rules as amount/method change.
- * Submits feeUi=1, addFee=on (when included) and fee (GH₵, editable).
+ * Transfer charge for a payment, worked out from the rule that applies (the account's own, or the user's
+ * rule for the method) as the amount changes. Submits feeUi=1, addFee=on (when included) and fee (GH₵, editable).
  */
-export function ChargeField({ amount, method, rules, initialFee }: { amount: number; method: string; rules: FeeRules; initialFee?: number }) {
+export function ChargeField({ amount, method, rule, ruleName, initialFee }: { amount: number; method: string; rule: FeeRule | null; ruleName?: string; initialFee?: number }) {
   const uid = useId();
-  const computed = transferFee(amount, method, rules);
+  const computed = method === "cash" ? 0 : feeFor(amount, rule);
+  const name = ruleName ?? METHOD_LABEL[method] ?? method;
   const [include, setInclude] = useState<boolean | null>(initialFee != null ? initialFee > 0 : null);
   const [custom, setCustom] = useState<string | null>(initialFee ? (initialFee / 100).toFixed(2) : null);
   const on = method !== "cash" && (include ?? computed > 0);
   const value = custom ?? (computed / 100).toFixed(2);
-  const rule = rules[method];
   const explain =
     method === "cash"
       ? "No charge on cash."
       : amount <= 0 && custom == null
-        ? `Worked out from your ${METHOD_LABEL[method] ?? method} rule once you enter an amount.`
-      : computed > 0 && custom == null
-        ? `${rule.pct}% of GH₵ ${f2(amount)}${rule.cap ? `, max ${f2(rule.cap)}` : ""} (your ${METHOD_LABEL[method] ?? method} rule)`
+        ? `Worked out from your ${name} rule once you enter an amount.`
+      : computed > 0 && custom == null && rule
+        ? `${rule.pct}% of GH₵ ${f2(amount)}${rule.cap ? `, max ${f2(rule.cap)}` : ""} (your ${name} rule)`
         : computed === 0 && custom == null
-          ? `No charge for ${METHOD_LABEL[method] ?? method} under your rules.`
+          ? `No charge for ${name} under your rules.`
           : "Your own amount.";
   return (
     <div className="sk-stack" style={{ gap: 6 }}>

@@ -41,8 +41,29 @@ export function feeRules(saved: Record<string, FeeRule> | undefined | null): Fee
 
 /** Charge for paying `amount` (pesewas) by `method`. */
 export function transferFee(amount: number, method: string, rules: FeeRules): number {
-  const r = rules[method];
-  if (!r || r.pct <= 0 || amount <= 0 || method === "cash") return 0;
+  return method === "cash" ? 0 : feeFor(amount, rules[method]);
+}
+
+/** Charge under one rule: pct of the amount, capped (cap 0 = no cap). No rule = no charge. */
+export function feeFor(amount: number, r: FeeRule | null | undefined): number {
+  if (!r || r.pct <= 0 || amount <= 0) return 0;
   const fee = Math.round((amount * r.pct) / 100);
   return r.cap > 0 ? Math.min(fee, r.cap) : fee;
+}
+
+/** Kinds of account a user can add; each implies a payment method. */
+export const ACCOUNT_KINDS = [
+  { value: "bank", label: "Bank account" },
+  { value: "momo", label: "Mobile money" },
+  { value: "card", label: "Card" },
+  { value: "ghanapay", label: "GhanaPay" },
+  { value: "cash", label: "Cash" },
+  { value: "other", label: "Other" },
+] as const;
+export const ACCOUNT_KIND_VALUES = ACCOUNT_KINDS.map((k) => k.value) as [string, ...string[]];
+
+/** The rule that applies to a payment: the account's own, else the user's rule for its method. Cash never. */
+export function ruleFor(method: string, rules: FeeRules, accountFee?: FeeRule | null): FeeRule | null {
+  if (method === "cash") return null;
+  return accountFee ?? rules[method] ?? null;
 }

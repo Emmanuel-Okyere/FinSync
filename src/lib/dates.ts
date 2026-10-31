@@ -39,6 +39,17 @@ export function addDays(iso: string, n: number) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Same date n years later (29 Feb becomes 28 Feb). */
+export function addYears(iso: string, n: number) {
+  const y = Number(iso.slice(0, 4)) + n;
+  const md = iso.slice(5);
+  if (md === "02-29" && !(y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0))) return `${y}-02-28`;
+  return `${y}-${md}`;
+}
+
+/** "3 Jan 2027": a date with its year, for due dates. */
+export const fmtDue = (iso: string) => fmt({ day: "numeric", month: "short", year: "numeric" }).format(new Date(`${iso}T00:00:00Z`));
+
 export function diffDays(a: string, b: string) {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
